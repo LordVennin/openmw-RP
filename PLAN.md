@@ -65,3 +65,24 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
 After phase 2, everything else is Lua with hot reloading, which iterates much faster than rebuilding C++.
+
+## Dev setup
+
+llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs on an RTX 4090 (24 GB).
+
+**Models** (both Q6_K, 9.8 GB each, in `~/llm/models/`):
+
+- `gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf` from [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-it-roleplay-sft-epoch2-bf16-GGUF). **Default for development.**
+- `gemma-4-12b-it-Q6_K.gguf` from [unsloth](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF), the base Gemma 4 model.
+
+**Launch command:**
+
+```
+~/llm/llama.cpp/build/bin/llama-server -m ~/llm/models/gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf -ngl 99 -c 8192 --jinja --port 8080
+```
+
+The endpoint is then `http://localhost:8080/v1/chat/completions`. To use the base model, swap the `-m` path.
+
+**Base model needs thinking turned off.** Gemma 4 thinks by default. Unless a request includes `"chat_template_kwargs": {"enable_thinking": false}`, it can spend the whole token budget reasoning and return an empty `content`. The roleplay fine-tune does not need this.
+
+**VRAM:** with either model loaded and an 8K context, the GPU used 13.4 GB of 24 GB in total, including about 2 GB already used by the desktop. That leaves about 10 GB for Morrowind.
