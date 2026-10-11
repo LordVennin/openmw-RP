@@ -122,6 +122,9 @@ set(BUILTIN_DATA_FILES
     openmw_aux/calendarconfig.lua
     openmw_aux/ui.lua
 
+    # rxi/json.lua 0.1.2 (MIT), commit dbf4b2dd2eb7c23be2773c89eb059dadd6436f94, used with openmw.llm
+    scripts/llm/json.lua
+
     builtin.omwscripts
 
     scripts/omw/activationhandlers.lua

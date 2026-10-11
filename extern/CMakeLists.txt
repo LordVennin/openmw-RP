@@ -295,3 +295,18 @@ if ((BUILD_COMPONENTS_TESTS OR BUILD_OPENCS_TESTS OR BUILD_OPENMW_TESTS) AND NOT
     add_library(GTest::GTest ALIAS gtest)
     add_library(GMock::GMock ALIAS gmock)
 endif()
+
+# Header-only HTTP client for the openmw.llm Lua package. Requests only go to plain-HTTP
+# localhost, so TLS and compression support stay off to avoid new system dependencies.
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
+include(FetchContent)
+FetchContent_Declare(cpp-httplib
+    URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.60.1.tar.gz
+    URL_HASH SHA512=59afd6ddbe9bc6f8f910c59a9e05536bf936ee071c7642f9a704c500a2290c054250e715d158efc0b280e14864408343827dc576fd2b6a00be74b0427693dd4c
+    SOURCE_DIR fetched/cpp-httplib
+)
+FetchContent_MakeAvailable(cpp-httplib)

@@ -36,6 +36,17 @@ A small patch is the most important design decision. OpenMW moves fast (0.50/0.5
 
 **Prompt order.** Send the system prompt first, then the card's greeting (`first_mes`) as an assistant message, then the alternating conversation turns, always ending with the user's message.
 
+**Instruct templates, not the embedded chat template.** Phase 3's prompt builder formats the prompt itself with SillyTavern-style instruct templates and sends it to llama-server's raw text-completion endpoint (`openmw.llm.request(body, cb, { endpoint = 'completion' })`), with the template's sequences as stop strings. It does not rely on the chat template embedded in the model file.
+- **Why:** the roleplay fine-tune produces broken, repetitive output through `/v1/chat/completions`, but works through text completion when driven the way SillyTavern does it.
+- **Gemma 4 sequences:** `<|turn>system`, `<|turn>user` and `<|turn>model`, each turn closed with `<turn|>`. Stop on `<turn|>` and `<|turn>`.
+- **Templates are data:** templates live in Lua data, so supporting another model family means adding a template, not changing C++.
+
+**No emojis or other glyphs the game fonts can't draw.** OpenMW renders text with its own font system, so emojis (and any character missing from the game font) don't display. Handle this in two places:
+- **Prompt:** tell the model in the system prompt not to use emojis.
+- **Reply sanitizer:** strip unsupported characters in Lua before text reaches the chat window. Models still emit emojis now and then, so the sanitizer is the real guarantee.
+
+Phase 2 testing confirmed that emojis come through `openmw.llm` and json.lua intact as UTF-8; they just can't be drawn.
+
 **Game state goes into the prompt.** This is what makes it feel like Morrowind rather than a chatbot in costume. The Lua API exposes the NPC's race, class, faction and rank, disposition, current cell, time of day, and the player's reputation and some quest state. Inject that into the system prompt each turn. A keyword-triggered lorebook covering the Tribunal, Great Houses, Sixth House and so on does the rest.
 
 **UI.** The vanilla dialogue window is C++/MyGUI and hard to extend. A separate Lua UI chat window with a text input is much easier. Open it from an added topic like "Let's talk," or a hotkey while looking at an NPC.
@@ -56,7 +67,7 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 
 - [x] Phase 0: get a clean build of unmodified OpenMW running.
 - [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
-- [ ] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
+- [x] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
 - [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it.
 - [ ] Phase 3: write the Lua mod: card loader, prompt builder, chat window.
 - [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
@@ -84,5 +95,13 @@ llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs o
 The endpoint is then `http://localhost:8080/v1/chat/completions`. To use the base model, swap the `-m` path.
 
 **Base model needs thinking turned off.** Gemma 4 thinks by default. Unless a request includes `"chat_template_kwargs": {"enable_thinking": false}`, it can spend the whole token budget reasoning and return an empty `content`. The roleplay fine-tune does not need this.
+
+**The roleplay fine-tune needs text completion.**
+- **Chat endpoint:** through `/v1/chat/completions` it degenerates into repetition, even for "Say hi". The cause isn't its embedded template (which renders the same prompt as the base model's), the GPU, the KV cache type or the file. SillyTavern drives the same file on the same llama-server well using text completion.
+- **What helps:** a substantial character card (SillyTavern's working request was about 1300 prompt tokens), and the character's name after the model prefix (`<|turn>model\nFargoth:`). Short prompts without a name prefix still tend to loop.
+- **SillyTavern's samplers:** temperature 0.85 (dynamic range 0.15), top_k 80, top_p 0.95, min_p 0.01, repeat_penalty 1.05 over the last 550 tokens, DRY off.
+- **Quality:** acceptable but rough.
+
+**SillyTavern against llama-server:** set DRY's sequence breakers to a non-empty list (for example `["\n", ":", "\"", "*"]`). llama-server rejects an empty list.
 
 **VRAM:** with either model loaded and an 8K context, the GPU used 13.4 GB of 24 GB in total, including about 2 GB already used by the desktop. That leaves about 10 GB for Morrowind.

@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <set>
 
 #include <osg/Stats>
@@ -19,6 +20,7 @@
 
 #include "engineevents.hpp"
 #include "globalscripts.hpp"
+#include "llmclient.hpp"
 #include "loadscripts.hpp"
 #include "localscripts.hpp"
 #include "luaevents.hpp"
@@ -187,6 +189,8 @@ namespace MWLua
 
         LuaUi::ResourceManager* uiResourceManager() { return &mUiResourceManager; }
 
+        LlmClient& llmClient() { return *mLlmClient; }
+
         bool isProcessingInputEvents() const { return mProcessingInputEvents; }
 
         void reportStats(unsigned int frameNumber, osg::Stats& stats) const;
@@ -275,6 +279,9 @@ namespace MWLua
         LuaUtil::InputTrigger::Registry mInputTriggers;
 
         LuaUtil::ScriptTracker mScriptTracker;
+
+        // Declared last so it is destroyed first, while the Lua state that owns its callbacks still exists.
+        std::unique_ptr<LlmClient> mLlmClient = std::make_unique<LlmClient>();
     };
 
 }

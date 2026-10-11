@@ -27,6 +27,7 @@ namespace Settings
         SettingValue<std::uint64_t> mInstructionLimitPerCall{ mIndex, "Lua", "instruction limit per call",
             makeMaxSanitizerUInt64(1001) };
         SettingValue<int> mGcStepsPerFrame{ mIndex, "Lua", "gc steps per frame", makeMaxSanitizerInt(0) };
+        SettingValue<int> mLlmPort{ mIndex, "Lua", "llm port", makeClampSanitizerInt(1, 65535) };
     };
 }
 

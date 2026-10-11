@@ -61,7 +61,7 @@ add_openmw_dir (mwscript
 add_openmw_dir (mwlua
     objectcache luamanagerimp object objectlists userdataserializer luaevents engineevents objectvariant loadscripts contentbindings
     context menuscripts globalscripts localscripts playerscripts luabindings objectbindings cellbindings coremwscriptbindings
-    mwscriptbindings camerabindings vfsbindings uibindings soundbindings inputbindings nearbybindings dialoguebindings llmbindings
+    mwscriptbindings camerabindings vfsbindings uibindings soundbindings inputbindings nearbybindings dialoguebindings llmbindings llmclient
     postprocessingbindings stats recordstore debugbindings corebindings worldbindings worker landbindings magicbindings factionbindings
     classbindings itemdata inputprocessor animationbindings birthsignbindings racebindings markupbindings weatherbindings regionbindings
     types/types types/door types/item types/actor types/container types/lockable types/weapon types/npc types/bodypart
@@ -189,6 +189,7 @@ target_link_libraries(openmw-lib
     osg-ffmpeg-videoplayer
     oics
     components
+    httplib::httplib
 )
 
 if (MSVC AND PRECOMPILE_HEADERS_WITH_MSVC)

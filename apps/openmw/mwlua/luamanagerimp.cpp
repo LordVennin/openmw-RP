@@ -293,6 +293,8 @@ namespace MWLua
         mLuaEvents.callEventHandlers();
 
         mLua.protectedCall([&](LuaUtil::LuaView& lua) {
+            mLlmClient->deliverResults(lua.sol(), *this);
+
             // Run queued callbacks
             for (CallbackWithData& c : mQueuedCallbacks)
                 c.mCallback.tryCall(c.mArg);
@@ -421,6 +423,7 @@ namespace MWLua
 
     void LuaManager::clear()
     {
+        mLlmClient->cancelAll();
         mActionQueue.clear();
         mTeleportPlayerAction.reset();
         LuaUi::clearGameInterface();

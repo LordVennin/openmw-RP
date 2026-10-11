@@ -77,3 +77,12 @@ Lua Settings
    state; this setting only controls whether collection happens at all
    (0 disables it). Without a separate thread, it is the amount of garbage
    collection performed each frame.
+
+.. omw-setting::
+   :title: llm port
+   :type: int
+   :range: 1 to 65535
+   :default: 8080
+
+   Port of the local LLM server (for example llama-server) used by the openmw.llm package.
+   Requests are only ever sent to 127.0.0.1 on this port.
