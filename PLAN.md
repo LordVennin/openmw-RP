@@ -52,8 +52,8 @@ Chat alone is straightforward; letting the model change the game is where most o
 
 Make "build unmodified OpenMW from source" phase zero: the codebase is large C++ (CMake, OpenSceneGraph, MyGUI, LuaJIT via sol2), and getting it to build is often the biggest early hurdle, especially on Windows.
 
-- [ ] Phase 0: get a clean build of unmodified OpenMW running.
-- [ ] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
+- [x] Phase 0: get a clean build of unmodified OpenMW running.
+- [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
 - [ ] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
 - [ ] Phase 3: write the Lua mod: card loader, prompt builder, chat window.
 - [ ] Phase 4: add game actions, memory, and the lorebook.

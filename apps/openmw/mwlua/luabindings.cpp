@@ -14,6 +14,7 @@
 #include "corebindings.hpp"
 #include "debugbindings.hpp"
 #include "inputbindings.hpp"
+#include "llmbindings.hpp"
 #include "localscripts.hpp"
 #include "markupbindings.hpp"
 #include "menuscripts.hpp"
@@ -73,6 +74,7 @@ namespace MWLua
             { "openmw.camera", initCameraPackage(context.sol()) },
             { "openmw.debug", initDebugPackage(context) },
             { "openmw.input", initInputPackage(context) },
+            { "openmw.llm", initLlmPackage(context) },
             { "openmw.postprocessing", initPostprocessingPackage(context) },
             { "openmw.ui", initUserInterfacePackage(context) },
         };
