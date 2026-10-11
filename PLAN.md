@@ -34,6 +34,8 @@ A small patch is the most important design decision. OpenMW moves fast (0.50/0.5
 - Map each card to an NPC by record ID.
 - Runtime PNG parsing would need more engine work, since Lua reads files only through the VFS.
 
+**Prompt order.** Send the system prompt first, then the card's greeting (`first_mes`) as an assistant message, then the alternating conversation turns, always ending with the user's message.
+
 **Game state goes into the prompt.** This is what makes it feel like Morrowind rather than a chatbot in costume. The Lua API exposes the NPC's race, class, faction and rank, disposition, current cell, time of day, and the player's reputation and some quest state. Inject that into the system prompt each turn. A keyword-triggered lorebook covering the Tribunal, Great Houses, Sixth House and so on does the rest.
 
 **UI.** The vanilla dialogue window is C++/MyGUI and hard to extend. A separate Lua UI chat window with a text input is much easier. Open it from an added topic like "Let's talk," or a hotkey while looking at an NPC.
@@ -55,7 +57,11 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [x] Phase 0: get a clean build of unmodified OpenMW running.
 - [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
 - [ ] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
+- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it.
 - [ ] Phase 3: write the Lua mod: card loader, prompt builder, chat window.
+- [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
 - [ ] Phase 4: add game actions, memory, and the lorebook.
+
+Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
 After phase 2, everything else is Lua with hot reloading, which iterates much faster than rebuilding C++.
