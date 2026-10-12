@@ -306,6 +306,12 @@ namespace MWGui
         eventTopicActivated(mTopicId);
     }
 
+    void LuaChoice::activated()
+    {
+        MWBase::Environment::get().getWindowManager()->playSound(ESM::RefId::stringRefId("Menu Click"));
+        eventLuaChoiceActivated(mChoiceId);
+    }
+
     void Goodbye::activated()
     {
         MWBase::Environment::get().getWindowManager()->playSound(ESM::RefId::stringRefId("Menu Click"));
@@ -490,6 +496,7 @@ namespace MWGui
         bool sameActor = (mPtr == actor);
         if (!sameActor)
         {
+            mLuaChoices.clear();
             // The history is not reset here
             mKeywords.clear();
             mTopicsList->clear();
@@ -562,6 +569,7 @@ namespace MWGui
             return;
         // Reset history
         mHistoryContents.clear();
+        mLuaChoices.clear();
     }
 
     bool DialogueWindow::setKeywords(const std::list<std::string>& keyWords)
@@ -696,6 +704,20 @@ namespace MWGui
                 body, textColours.answer, textColours.answerOver, textColours.answerPressed, interactiveId);
             typesetter->write(questionStyle, choice.first);
             mChoiceStyles.push_back(questionStyle);
+        }
+
+        // choices from Lua scripts
+        for (const auto& [id, label] : mLuaChoices)
+        {
+            auto link = std::make_unique<LuaChoice>(id);
+            link->eventLuaChoiceActivated += MyGUI::newDelegate(this, &DialogueWindow::onLuaChoiceActivated);
+            auto interactiveId = TypesetBook::InteractiveId(link.get());
+            mLinks.push_back(std::move(link));
+
+            typesetter->lineBreak();
+            BookTypesetter::Style* choiceStyle = typesetter->createHotStyle(
+                body, textColours.answer, textColours.answerOver, textColours.answerPressed, interactiveId);
+            typesetter->write(choiceStyle, label);
         }
 
         mGoodbye = MWBase::Environment::get().getDialogueManager()->isGoodbye();
@@ -847,6 +869,23 @@ namespace MWGui
 
         sender->setCaption({});
         MWBase::Environment::get().getLuaManager()->dialogueTextInput(mPtr, text);
+    }
+
+    void DialogueWindow::setLuaChoices(std::vector<std::pair<std::string, std::string>> choices)
+    {
+        mLuaChoices = std::move(choices);
+        updateHistory();
+    }
+
+    void DialogueWindow::onLuaChoiceActivated(const std::string& id)
+    {
+        if (mPtr.isEmpty() || mGoodbye)
+            return;
+        // Copy before clearing: `id` belongs to a link that updateHistory() is about to replace
+        const std::string action = "choice:" + id;
+        mLuaChoices.clear();
+        updateHistory();
+        MWBase::Environment::get().getLuaManager()->dialogueAction(mPtr, action);
     }
 
     void DialogueWindow::onRecallClicked(MyGUI::Widget* /*sender*/)

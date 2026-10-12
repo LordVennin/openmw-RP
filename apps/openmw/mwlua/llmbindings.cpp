@@ -77,6 +77,28 @@ namespace MWLua
                 "setDialogueInputAction");
         };
 
+        api["setDialogueChoices"] = [context](const sol::optional<sol::table>& list) {
+            std::vector<std::pair<std::string, std::string>> choices;
+            if (list.has_value())
+            {
+                for (size_t i = 1; i <= list->size(); ++i)
+                {
+                    sol::object value = (*list)[i];
+                    if (!value.is<sol::table>())
+                        continue;
+                    sol::table choice = value.as<sol::table>();
+                    choices.emplace_back(choice.get_or<std::string>("id", {}), choice.get_or<std::string>("label", {}));
+                }
+            }
+            context.mLuaManager->addAction(
+                [choices = std::move(choices)]() mutable {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (windowManager->containsMode(MWGui::GM_Dialogue))
+                        windowManager->getDialogueWindow()->setLuaChoices(std::move(choices));
+                },
+                "setDialogueChoicesAction");
+        };
+
         api["addDialogueResponse"] = [context](std::string text, const sol::optional<sol::table>& options) {
             std::string title;
             if (options.has_value())

@@ -104,7 +104,16 @@ local function maxCount(candidates)
     return max
 end
 
--- JSON schema for the classification. The enums are the only values the model can produce.
+-- Each check has a fixed direction: the offer check (before the reply) only looks for the player giving, the action
+-- check (after the reply) only for the NPC giving. The model doesn't answer yes or no; it quotes the words that hand
+-- something over ("evidence"), or "none". Small models quote reliably but are unreliable at the final yes/no, so the
+-- decision is made here from the quote, which must also really appear in the line being judged.
+M.PLAYER_GIVES = 'player_to_npc'
+M.NPC_GIVES = 'npc_to_player'
+
+local MAX_EVIDENCE_LENGTH = 160
+
+-- JSON schema for a check, as a table (for tests). The item enum is the only set of ids the model can produce.
 function M.schema(candidates)
     local ids = { 'none' }
     for _, c in ipairs(candidates) do
@@ -113,49 +122,131 @@ function M.schema(candidates)
     return {
         type = 'object',
         properties = {
-            transfer = { enum = { 'none', 'player_to_npc', 'npc_to_player' } },
+            evidence = { type = 'string', maxLength = MAX_EVIDENCE_LENGTH },
             item = { enum = ids },
             count = { type = 'integer', minimum = 0, maximum = maxCount(candidates) },
         },
-        required = { 'transfer', 'item', 'count' },
+        required = { 'evidence', 'item', 'count' },
     }
 end
 
--- The classification prompt, in the active instruct template
--- @param exchange list of { speaker = name, text = string }, oldest first (the last exchange or two)
-function M.prompt(template, npcName, playerName, exchange, candidates)
-    local system = 'You are the game master of a Morrowind role-play. Decide whether an item or gold changed hands '
-        .. 'in the latest exchange between ' .. playerName .. ' and ' .. npcName .. '. Count it only if the giver '
-        .. 'clearly hands it over in this exchange and the receiver accepts it. Offers, promises, haggling, '
-        .. 'refusals and things that happened earlier do not count. Answer with JSON only.'
-
-    local lines = { 'Conversation:' }
-    for _, turn in ipairs(exchange) do
-        lines[#lines + 1] = turn.speaker .. ': ' .. turn.text
-    end
-    lines[#lines + 1] = ''
-    lines[#lines + 1] = 'Items that could be involved (id - name - who has how many):'
-    for _, c in ipairs(candidates) do
-        lines[#lines + 1] = string.format('%s - %s - %s has %d, %s has %d', c.id, c.name or c.id, playerName,
-            c.playerCount, npcName, c.npcCount)
-    end
-    lines[#lines + 1] = ''
-    lines[#lines + 1] = 'Answer as {"transfer": "none" | "player_to_npc" | "npc_to_player", "item": item id or '
-        .. '"none", "count": number of items or gold pieces}. "player_to_npc" means ' .. playerName .. ' gave it to '
-        .. npcName .. '.'
-
+local function promptText(template, system, lines)
     return template.systemPrefix .. system .. template.systemSuffix
         .. template.userPrefix .. table.concat(lines, '\n') .. template.userSuffix
         .. template.modelPrefix .. (template.replyPrefix or '')
 end
 
--- Checks the model's answer against the candidates and the giver's inventory.
--- @return { transfer, item, name, count } or nil when nothing should happen
-function M.parse(answer, candidates)
-    if type(answer) ~= 'table' or answer.transfer == 'none' or answer.item == 'none' then
-        return nil
+-- The action check, after the reply: does the NPC give the player one of their own items or gold?
+-- @param exchange list of { speaker = name, text = string }, oldest first (the last exchange)
+function M.prompt(template, npcName, playerName, exchange, candidates)
+    local system = 'You are the game master of a Morrowind role-play. Decide whether ' .. npcName .. ' gives one of '
+        .. 'their own items or gold to ' .. playerName .. ' in ' .. npcName .. '\'s latest reply, for example paying '
+        .. playerName .. ' or handing over a reward. Only ' .. npcName .. ' giving counts: ' .. playerName .. ' giving '
+        .. 'something, ' .. npcName .. ' holding out a hand to receive, asking for money, saying they have none, '
+        .. 'promises and refusals do not count. Answer with JSON only.'
+    local lines = { 'Conversation:' }
+    for _, turn in ipairs(exchange) do
+        lines[#lines + 1] = turn.speaker .. ': ' .. turn.text
     end
-    if answer.transfer ~= 'player_to_npc' and answer.transfer ~= 'npc_to_player' then
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = 'Items ' .. npcName .. ' carries that could be involved (id - name - count):'
+    for _, c in ipairs(candidates) do
+        lines[#lines + 1] = string.format('%s - %s - %d', c.id, c.name or c.id, c.npcCount)
+    end
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = 'Answer as {"evidence": the exact words from ' .. npcName .. '\'s latest reply where ' .. npcName
+        .. ' hands the item or gold to ' .. playerName .. ', or "none" if there are no such words, "item": item id or '
+        .. '"none", "count": number}.'
+    return promptText(template, system, lines)
+end
+
+-- The offer check, before the reply: does the player hand one of their items or gold to the NPC in this line?
+-- Doing this first lets the reply react to the handover (and to the vanilla quest reaction and rewards).
+-- @param npcLastLine what the NPC said just before (for amounts like "the money you need"), or nil
+function M.offerPrompt(template, npcName, playerName, userLine, candidates, npcLastLine)
+    local system = 'You are the game master of a Morrowind role-play. Decide whether ' .. playerName .. ' gives, '
+        .. 'or is giving, one of their items or gold to ' .. npcName .. ' in their latest line, for example '
+        .. '"here, take it", "have some gold" or "here is the money you asked for". Saying "I could give you..." or '
+        .. '"let me give you..." while reaching for or handing over the item also counts. Questions, refusals, '
+        .. 'haggling and offers with a condition ("if you...") do not count. Answer with JSON only.'
+    local lines = {}
+    if npcLastLine and npcLastLine ~= '' then
+        lines[#lines + 1] = npcName .. ' (just before): ' .. npcLastLine
+    end
+    lines[#lines + 1] = playerName .. ': ' .. userLine
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = 'Items ' .. playerName .. ' carries that could be involved (id - name - count):'
+    for _, c in ipairs(candidates) do
+        lines[#lines + 1] = string.format('%s - %s - %d', c.id, c.name or c.id, c.playerCount)
+    end
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = 'Answer as {"evidence": the exact words from ' .. playerName .. '\'s latest line where '
+        .. playerName .. ' hands the item or gold over, or "none" if there are no such words, "item": item id or '
+        .. '"none", "count": number}. For "count", use the amount named in the conversation (for example a price '
+        .. npcName .. ' asked for); only if no amount was named, use 1 for items.'
+    return promptText(template, system, lines)
+end
+
+local function jsonString(s)
+    return '"' .. s:gsub('[%c"\\]', function(c)
+        return string.format('\\u%04x', c:byte())
+    end) .. '"'
+end
+
+-- The schema as JSON text with a fixed property order: the model writes the evidence first, then the item and count.
+function M.schemaJson(candidates)
+    local schema = M.schema(candidates)
+    local quoted = {}
+    for i, v in ipairs(schema.properties.item.enum) do
+        quoted[i] = jsonString(v)
+    end
+    return string.format('{"type":"object","properties":{"evidence":{"type":"string","maxLength":%d},'
+        .. '"item":{"enum":[%s]},"count":{"type":"integer","minimum":0,"maximum":%d}},'
+        .. '"required":["evidence","item","count"]}', MAX_EVIDENCE_LENGTH, table.concat(quoted, ','),
+        schema.properties.count.maximum)
+end
+
+-- Encodes a check's request body with the schema spliced in, keeping its property order
+function M.encodeRequest(json, body, schemaText)
+    local text = json.encode(body)
+    return text:sub(1, -2) .. ',"json_schema":' .. schemaText .. '}'
+end
+
+local function normalize(text)
+    return ' ' .. text:lower():gsub('[^%w]+', ' '):gsub('^ +', ''):gsub(' +$', '') .. ' '
+end
+
+-- Whether the quoted evidence really appears in the judged text (exactly, or at least most of its words)
+function M.evidenceFound(evidence, text)
+    if type(evidence) ~= 'string' then
+        return false
+    end
+    local quote = normalize(evidence)
+    if quote == '  ' or quote == ' none ' then
+        return false
+    end
+    local haystack = normalize(text)
+    if haystack:find(quote, 1, true) then
+        return true
+    end
+    local words, found = 0, 0
+    for word in quote:gmatch('%S+') do
+        if #word >= 2 then
+            words = words + 1
+            if haystack:find(' ' .. word .. ' ', 1, true) then
+                found = found + 1
+            end
+        end
+    end
+    return words > 0 and found / words >= 0.6
+end
+
+-- Turns a check's answer into a transfer, after checking it against the candidates and the giver's inventory.
+-- @param direction M.PLAYER_GIVES or M.NPC_GIVES (fixed per check)
+-- @param judgedText the line the evidence must come from (the player's line, or the NPC's reply)
+-- @return { transfer, item, name, count } or nil when nothing should happen
+function M.parse(answer, candidates, direction, judgedText)
+    if type(answer) ~= 'table' or answer.item == 'none' or not M.evidenceFound(answer.evidence, judgedText or '') then
         return nil
     end
     local count = math.floor(tonumber(answer.count) or 0)
@@ -164,13 +255,13 @@ function M.parse(answer, candidates)
     end
     for _, c in ipairs(candidates) do
         if c.id == answer.item then
-            local available = answer.transfer == 'player_to_npc' and c.playerCount or c.npcCount
+            local available = direction == M.PLAYER_GIVES and c.playerCount or c.npcCount
             local cap = c.id == GOLD_ID and MAX_GOLD or MAX_ITEM_COUNT
             count = math.min(count, available, cap)
             if count <= 0 then
                 return nil
             end
-            return { transfer = answer.transfer, item = c.id, name = c.name, count = count }
+            return { transfer = direction, item = c.id, name = c.name, count = count }
         end
     end
     return nil

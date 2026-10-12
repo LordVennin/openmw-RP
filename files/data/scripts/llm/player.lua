@@ -166,10 +166,26 @@ local function recallConversation(npc)
     setInput(pending == nil, pending and l10n('thinking', { name = pending.npcName }) or nil)
 end
 
+-- A turn runs through these stages, with the text input disabled until it is finished:
+--   'offer'          if the player's line mentions an item they carry: is it being handed over right now?
+--   'confirmOffer'   if so, the player confirms with a dialogue choice ("Give X" / "Keep it")
+--   'pretransfer'    the handover is applied first (with vanilla quest effects and rewards)...
+--   'reply'          ...so the NPC's reply can react to it
+--   'action'         if the exchange mentions items: did the NPC hand something over, or the player after all?
+--   'confirmAction'  the player confirms ("Give X" / "Keep it", or "Accept X" / "Refuse")
+--   'transfer'       applying that
+-- Nothing changes hands without the player's click, so a wrong guess by the model costs nothing.
+local function isWaitingForServer(stage)
+    return stage == 'offer' or stage == 'reply' or stage == 'action'
+end
+
 local function cancelPending()
     if pending then
-        if pending.stage ~= 'transfer' then
+        if isWaitingForServer(pending.stage) then
             llm.cancel(pending.id)
+        end
+        if pending.stage == 'confirmOffer' or pending.stage == 'confirmAction' then
+            llm.setDialogueChoices({})
         end
         pending = nil
     end
@@ -183,40 +199,38 @@ local function finishTurn()
     end
 end
 
-local function onActionReply(request, response)
-    if not pending or pending.id ~= request.id or pending.stage ~= 'action' then
-        return
+-- The model's JSON answer from a classification request, or nil
+local function decodeAnswer(response, label)
+    if not response.ok then
+        print('LLM ' .. label .. ' failed: ' .. tostring(response.error or response.status))
+        return nil
     end
-    local transfer = nil
-    if response.ok then
-        local ok, data = pcall(json.decode, response.body)
-        local okAnswer, answer = false, nil
-        if ok and type(data) == 'table' and type(data.content) == 'string' then
-            okAnswer, answer = pcall(json.decode, data.content)
+    local ok, data = pcall(json.decode, response.body)
+    if ok and type(data) == 'table' and type(data.content) == 'string' then
+        local okAnswer, answer = pcall(json.decode, data.content)
+        if okAnswer then
+            return answer
         end
-        transfer = okAnswer and actions.parse(answer, request.candidates) or nil
-    else
-        print('LLM action check failed: ' .. tostring(response.error or response.status))
     end
-    if not transfer then
-        finishTurn()
-        return
-    end
+    return nil
+end
 
+local function applyTransfer(turn, transfer, stage)
     local effects = nil
     if transfer.transfer == 'player_to_npc' then
-        local ok, found = pcall(handover.find, request.npc, self.object, transfer.item, localsByNpc[request.npc.id])
+        local ok, found = pcall(handover.find, turn.npc, self.object, transfer.item, localsByNpc[turn.npc.id],
+            transfer.count)
         effects = ok and found or nil
         if not ok then
             print('LLM handover lookup: ' .. tostring(found))
         end
     end
-    pending.stage = 'transfer'
-    pending.transfer = transfer
-    pending.effects = effects
+    turn.stage = stage
+    turn.transfer = transfer
+    turn.effects = effects
     core.sendGlobalEvent('LLMApplyTransfer', {
         player = self.object,
-        npc = request.npc,
+        npc = turn.npc,
         transfer = transfer.transfer,
         item = transfer.item,
         count = transfer.count,
@@ -224,72 +238,229 @@ local function onActionReply(request, response)
     })
 end
 
+local function itemLabel(name, count)
+    return count > 1 and (count .. ' ' .. name) or name
+end
+
+local numberWords = { 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'twenty', 'thirty',
+    'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand' }
+
+-- Whether the player named an amount themselves ("20 gold", "fifty drakes")
+local function namesAmount(text)
+    local lower = text:lower()
+    if lower:find('%d') then
+        return true
+    end
+    for _, word in ipairs(numberWords) do
+        if lower:find('%f[%a]' .. word .. '%f[%A]') then
+            return true
+        end
+    end
+    return false
+end
+
+-- When the player gives an NPC something a vanilla quest line asks for, use the quest's amount (e.g. Vodunius
+-- Nuccius's 100 drakes) instead of the model's guess, as long as the player has that many and didn't name an
+-- amount of their own.
+local function useQuestAmount(turn, transfer, candidates)
+    if transfer.transfer ~= 'player_to_npc' or namesAmount(turn.userText) then
+        return
+    end
+    local ok, required = pcall(handover.requiredCount, turn.npc, self.object, transfer.item, localsByNpc[turn.npc.id])
+    if not ok or not required then
+        return
+    end
+    for _, c in ipairs(candidates) do
+        if c.id == transfer.item and c.playerCount >= required then
+            transfer.count = required
+            return
+        end
+    end
+end
+
+-- Shows "Give X" / "Keep it" (or "Accept X" / "Refuse") as dialogue choices and waits for the click
+local function askToConfirm(turn, transfer, stage)
+    turn.stage = stage
+    turn.proposed = transfer
+    local item = itemLabel(transfer.name or transfer.item, transfer.count)
+    local choices
+    if transfer.transfer == 'player_to_npc' then
+        choices = { { id = 'yes', label = l10n('giveChoice', { item = item }) }, { id = 'no', label = l10n('keepChoice') } }
+    else
+        choices = { { id = 'yes', label = l10n('acceptChoice', { item = item }) }, { id = 'no', label = l10n('refuseChoice') } }
+    end
+    llm.setDialogueChoices(choices)
+    setInput(false, l10n('chooseHint'))
+end
+
+local startReply
+
+-- The player clicked one of the confirmation choices
+local function onChoice(choiceId)
+    local turn = pending
+    if not turn or (turn.stage ~= 'confirmOffer' and turn.stage ~= 'confirmAction') then
+        return
+    end
+    local transfer = turn.proposed
+    turn.proposed = nil
+    if turn.stage == 'confirmOffer' then
+        if choiceId == 'yes' then
+            applyTransfer(turn, transfer, 'pretransfer')
+        else
+            startReply(turn)
+        end
+    else
+        if choiceId == 'yes' then
+            applyTransfer(turn, transfer, 'transfer')
+        else
+            finishTurn()
+        end
+    end
+end
+
+local function sendClassification(turn, body, schemaText, stage, callback)
+    local id = llm.request(actions.encodeRequest(json, body, schemaText), async:callback(callback),
+        { endpoint = 'completion', timeout = ACTION_TIMEOUT })
+    if not id then
+        return false
+    end
+    turn.id = id
+    turn.stage = stage
+    return true
+end
+
+local function onActionReply(id, candidates, reply, response)
+    if not pending or pending.id ~= id or pending.stage ~= 'action' then
+        return
+    end
+    local transfer = actions.parse(decodeAnswer(response, 'action check'), candidates, actions.NPC_GIVES, reply)
+    if transfer then
+        useQuestAmount(pending, transfer, candidates)
+        askToConfirm(pending, transfer, 'confirmAction')
+    else
+        finishTurn()
+    end
+end
+
 -- After a reply: if an item could have changed hands, ask the model to classify the exchange.
 -- @return true if a check was started (the turn continues), false if the turn is over
-local function startActionCheck(request, reply)
-    local candidates = actions.findCandidates({ request.userText, reply }, inventoryItems(self.object),
-        inventoryItems(request.npc), request.limits.actionCandidates)
+local function startActionCheck(turn, reply)
+    -- Only what the NPC carries: the player giving was already decided before the reply
+    local candidates = actions.findCandidates({ turn.userText, reply }, {}, inventoryItems(turn.npc),
+        turn.limits.actionCandidates)
     if #candidates == 0 then
         return false
     end
     local userName = playerName()
     local exchange = {
-        { speaker = userName, text = request.userText },
-        { speaker = request.npcName, text = reply },
+        { speaker = userName, text = turn.userText },
+        { speaker = turn.npcName, text = reply },
     }
     local body = {
-        prompt = actions.prompt(template(), request.npcName, userName, exchange, candidates),
-        n_predict = 64,
+        prompt = actions.prompt(template(), turn.npcName, userName, exchange, candidates),
+        n_predict = 128,
         temperature = 0,
-        json_schema = actions.schema(candidates),
         stop = template().stop,
     }
-    local action = { npc = request.npc, candidates = candidates }
-    local id = llm.request(json.encode(body), async:callback(function(response)
-        onActionReply(action, response)
-    end), { endpoint = 'completion', timeout = ACTION_TIMEOUT })
-    if not id then
+    local id
+    local started = sendClassification(turn, body, actions.schemaJson(candidates), 'action', function(response)
+        onActionReply(id, candidates, reply, response)
+    end)
+    id = turn.id
+    return started
+end
+
+local function onOfferReply(id, candidates, response)
+    if not pending or pending.id ~= id or pending.stage ~= 'offer' then
+        return
+    end
+    local transfer = actions.parse(decodeAnswer(response, 'offer check'), candidates, actions.PLAYER_GIVES,
+        pending.userText)
+    if transfer then
+        useQuestAmount(pending, transfer, candidates)
+        askToConfirm(pending, transfer, 'confirmOffer')
+    else
+        startReply(pending)
+    end
+end
+
+-- Before the reply: is the player handing over one of their items in this line?
+-- @return true if a check was started
+local function startOfferCheck(turn)
+    local candidates = actions.findCandidates({ turn.userText }, inventoryItems(self.object), {},
+        turn.limits.actionCandidates)
+    if #candidates == 0 then
         return false
     end
-    action.id = id
-    pending.id = id
-    pending.stage = 'action'
-    return true
+    local history = historyFor(turn.npc)
+    local npcLastLine = history.greeting
+    for i = #history.turns, 1, -1 do
+        if history.turns[i].role == 'model' then
+            npcLastLine = history.turns[i].text
+            break
+        end
+    end
+    local body = {
+        prompt = actions.offerPrompt(template(), turn.npcName, playerName(), turn.userText, candidates, npcLastLine),
+        n_predict = 128,
+        temperature = 0,
+        stop = template().stop,
+    }
+    local id
+    local started = sendClassification(turn, body, actions.schemaJson(candidates), 'offer', function(response)
+        onOfferReply(id, candidates, response)
+    end)
+    id = turn.id
+    return started
 end
 
 local function onTransferApplied(result)
-    if not pending or pending.stage ~= 'transfer' then
+    if not pending or (pending.stage ~= 'transfer' and pending.stage ~= 'pretransfer') then
         return
     end
-    local npc = pending.npc
+    local turn = pending
     if result.ok then
-        local item = result.count > 1 and (result.count .. ' ' .. result.name) or result.name
+        local item = itemLabel(result.name, result.count)
         local notice = result.transfer == 'player_to_npc' and 'itemRemoved' or 'itemAdded'
         ui.showMessage(l10n(notice, { item = item }), { showInDialogue = true })
         -- No journal notice here: the engine shows "Your journal has been updated" itself when an entry is added
-        local history = historyFor(npc)
+        local rewards = {}
+        for _, reward in ipairs(result.applied and result.applied.rewards or {}) do
+            local label = itemLabel(reward.name, reward.count)
+            rewards[#rewards + 1] = label
+            ui.showMessage(l10n('itemAdded', { item = label }), { showInDialogue = true })
+        end
         local event
         if result.transfer == 'player_to_npc' then
-            event = string.format('The stranger gave %s %s.', pending.npcName, item)
+            event = string.format('The stranger gave %s %s.', turn.npcName, item)
         else
-            event = string.format('%s gave the stranger %s.', pending.npcName, item)
+            event = string.format('%s gave the stranger %s.', turn.npcName, item)
         end
-        if pending.effects and pending.effects.note then
-            event = pending.effects.note
-        elseif result.applied and result.applied.journal then
-            event = event .. ' This settled a matter between them.'
+        if turn.effects and turn.effects.note then
+            event = turn.effects.note
         end
-        table.insert(history.events, event)
+        if #rewards > 0 then
+            event = event .. string.format(' %s rewarded the stranger with %s.', turn.npcName, table.concat(rewards, ', '))
+        end
+        table.insert(historyFor(turn.npc).events, event)
+        if turn.stage == 'pretransfer' then
+            turn.justHappened = { item = item, effects = turn.effects, rewards = rewards }
+        end
     else
         print('LLM transfer failed: ' .. tostring(result.error))
     end
-    finishTurn()
+    if turn.stage == 'pretransfer' then
+        startReply(turn)
+    else
+        finishTurn()
+    end
 end
 
-local function onReply(request, response)
-    if not pending or pending.id ~= request.id or pending.stage ~= 'reply' then
+local function onReply(id, response)
+    if not pending or pending.id ~= id or pending.stage ~= 'reply' then
         return
     end
+    local turn = pending
 
     local continues = false
     if not response.ok then
@@ -300,22 +471,25 @@ local function onReply(request, response)
         local content = ok and type(data) == 'table' and data.content or ''
         local reply = sanitize.reply(content, {
             specialTokens = template().specialTokens,
-            speakerName = request.npcName,
+            speakerName = turn.npcName,
         })
         if ok and data.stop_type == 'limit' then
             reply = sanitize.trimIncomplete(reply)
         end
         if reply == '' then
-            reply = '*' .. request.npcName .. ' says nothing.*'
+            reply = '*' .. turn.npcName .. ' says nothing.*'
         end
-        local history = historyFor(request.npc)
-        table.insert(history.turns, { role = 'user', text = request.userText })
+        local history = historyFor(turn.npc)
+        table.insert(history.turns, { role = 'user', text = turn.userText })
         table.insert(history.turns, { role = 'model', text = reply })
         llm.addDialogueResponse(reply)
-        local ok, started = pcall(startActionCheck, request, reply)
-        continues = ok and started
-        if not ok then
-            print('LLM action check: ' .. tostring(started))
+        -- A handover before the reply already settled this turn's exchange
+        if not turn.justHappened then
+            local okCheck, started = pcall(startActionCheck, turn, reply)
+            continues = okCheck and started
+            if not okCheck then
+                print('LLM action check: ' .. tostring(started))
+            end
         end
     end
 
@@ -324,15 +498,32 @@ local function onReply(request, response)
     end
 end
 
-local function sendLine(npc, rawText)
-    local userText = sanitize.toDrawable(rawText):gsub('^%s+', ''):gsub('%s+$', '')
-    if userText == '' then
-        return
+-- Tells the model about a handover that just happened, with vanilla's reaction and rewards, so the reply
+-- plays it out instead of a generic thank-you
+local function justHappenedNote(turn)
+    local happened = turn.justHappened
+    if not happened then
+        return nil
     end
-    local npcName = types.NPC.record(npc).name
-    local userName = playerName()
+    local lines = { '[What just happened]', string.format('The stranger has just handed %s %s.', turn.npcName, happened.item) }
+    if happened.effects and happened.effects.text then
+        lines[#lines + 1] = string.format('In the original story, %s reacts like this: "%s"', turn.npcName,
+            sanitize.toDrawable(expandVanillaText(happened.effects.text, turn.npc)))
+    end
+    if #happened.rewards > 0 then
+        lines[#lines + 1] = string.format('%s has given the stranger a reward: %s.', turn.npcName,
+            table.concat(happened.rewards, ', '))
+    end
+    lines[#lines + 1] = string.format('%s now reacts to this, in character and in their own words.', turn.npcName)
+    return table.concat(lines, '\n')
+end
 
-    local limits = budget.fromContextSize(advancedSettings:get('contextSize'), generalSettings:get('replyTokens'))
+startReply = function(turn)
+    local npc = turn.npc
+    local npcName = turn.npcName
+    local userText = turn.userText
+    local userName = playerName()
+    local limits = turn.limits
     local history = historyFor(npc)
 
     local card = cards.load(npc.recordId)
@@ -376,13 +567,19 @@ local function sendLine(npc, rawText)
     elseif not okLore then
         print('LLM lorebook: ' .. tostring(loreNote))
     end
-    -- Things that happened in this conversation, such as items changing hands
-    if #history.events > 0 then
+    -- Things that happened in this conversation, such as items changing hands (this turn's handover is
+    -- described separately below)
+    local eventCount = #history.events - (turn.justHappened and 1 or 0)
+    if eventCount > 0 then
         local events = {}
-        for i = math.max(1, #history.events - limits.recentEvents + 1), #history.events do
+        for i = math.max(1, eventCount - limits.recentEvents + 1), eventCount do
             events[#events + 1] = '- ' .. history.events[i]
         end
         notes[#notes + 1] = '[Recent events]\n' .. table.concat(events, '\n')
+    end
+    local happenedNote = justHappenedNote(turn)
+    if happenedNote then
+        notes[#notes + 1] = happenedNote
     end
 
     local text, stop = prompt.build({
@@ -404,20 +601,45 @@ local function sendLine(npc, rawText)
     end
     body.temperature = generalSettings:get('temperature') or body.temperature
 
-    local request = { npc = npc, npcName = npcName, userText = userText, limits = limits, stage = 'reply' }
-    local id, err = llm.request(json.encode(body), async:callback(function(response)
-        onReply(request, response)
+    local id
+    local requestId, err = llm.request(json.encode(body), async:callback(function(response)
+        onReply(id, response)
     end), { endpoint = 'completion', timeout = REQUEST_TIMEOUT })
-    if not id then
+    if not requestId then
         ui.showMessage(l10n('serverError', { error = err }), { showInDialogue = true })
+        finishTurn()
         return
     end
-    request.id = id
-    pending = request
+    id = requestId
+    turn.id = requestId
+    turn.stage = 'reply'
+end
+
+local function sendLine(npc, rawText)
+    local userText = sanitize.toDrawable(rawText):gsub('^%s+', ''):gsub('%s+$', '')
+    if userText == '' then
+        return
+    end
+    local npcName = types.NPC.record(npc).name
+    local turn = {
+        npc = npc,
+        npcName = npcName,
+        userText = userText,
+        limits = budget.fromContextSize(advancedSettings:get('contextSize'), generalSettings:get('replyTokens')),
+    }
+    pending = turn
 
     -- Show the player's line like a topic heading, then wait for the reply
     llm.addDialogueResponse('', { title = userText })
     setInput(false, l10n('thinking', { name = npcName }))
+
+    local ok, started = pcall(startOfferCheck, turn)
+    if not ok then
+        print('LLM offer check: ' .. tostring(started))
+    end
+    if not (ok and started) then
+        startReply(turn)
+    end
 end
 
 local function onUiModeChanged(data)
@@ -531,8 +753,16 @@ return {
         UiModeChanged = onUiModeChanged,
         DialogueResponse = onDialogueResponse,
         DialogueAction = function(e)
-            if isEnabled() and e.action == 'recall' and types.NPC.objectIsInstance(e.actor) then
+            if not isEnabled() or not types.NPC.objectIsInstance(e.actor) then
+                return
+            end
+            if e.action == 'recall' then
                 recallConversation(e.actor)
+            else
+                local choiceId = e.action:match('^choice:(.*)$')
+                if choiceId then
+                    onChoice(choiceId)
+                end
             end
         end,
         LLMTransferApplied = onTransferApplied,

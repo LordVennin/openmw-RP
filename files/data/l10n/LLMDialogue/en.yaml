@@ -60,3 +60,8 @@ mistralTekken: "Mistral Tekken"
 
 itemRemoved: "{item} has been removed from your inventory."
 itemAdded: "{item} has been added to your inventory."
+giveChoice: "Give {item}"
+keepChoice: "Keep it"
+acceptChoice: "Accept {item}"
+refuseChoice: "Refuse"
+chooseHint: "Choose an answer above."

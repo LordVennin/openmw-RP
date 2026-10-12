@@ -71,7 +71,12 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`).
 - [x] Phase 3: write the Lua mod: card loader, prompt builder, chat window. Built as a text input inside the vanilla dialogue window (see below).
 - [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
-- [ ] Phase 4: add game actions, memory, and the lorebook.
+- [ ] Phase 4: add game actions, memory, and the lorebook. In progress:
+  - [x] item and gold exchange, confirmed with dialogue choices
+  - [x] quest effects and rewards taken from vanilla handover dialogue
+  - [x] starter lorebook
+  - [ ] rolling memory summaries
+  - [ ] other actions (disposition from conversation, attack/follow/end talk)
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
@@ -94,6 +99,25 @@ The player talks to any NPC in their own words from the vanilla dialogue window.
 - **`knowledge.lua`** builds a lorebook from vanilla dialogue. When a topic is mentioned, the NPC's vanilla answer is added, using the first line whose filters and conditions pass. Lines gated on script variables or death counts are skipped.
 - **`budget.lua`** derives every limit from one context size.
 - **`sanitize.lua`** strips characters the game font can't draw, and leaked special tokens.
+
+## Phase 4 so far: items, quests and lore
+
+**Item exchange:** nothing changes hands without the player's click.
+1. **Before the NPC replies:** if the player's line mentions something they carry, a short check asks the model to quote the words in that line that hand it over. The decision comes from the quote, which must really appear in the line. Small models quote reliably but get a final yes/no wrong.
+2. **Confirmation:** a hit shows vanilla-style dialogue choices ("Give X" / "Keep it").
+3. **Applying it:** `scripts/llm/global.lua` moves the item, and the reply is written knowing what happened.
+4. **After the reply:** a second check looks only for the NPC giving something ("Accept X" / "Refuse").
+
+**Quest effects without per-quest code:** `handover.lua` finds the NPC's vanilla dialogue line whose result script takes the given item from the player. 440 such lines exist in Morrowind.esm. It applies the safe part of that script:
+- journal entries;
+- the NPC's own variables;
+- disposition, the NPC's own and other NPCs' (deferred until that NPC is loaded);
+- item rewards;
+- faction reputation.
+
+If the player doesn't name an amount, the quest's required amount is offered (e.g. Vodunius Nuccius's 100 drakes). The vanilla reaction line and rewards are given to the model, so the reply plays them out. Optional `llm/quests/*.json` hooks can override auto-detection.
+
+**Knowledge:** an NPC's own topic and their personal topics are always known, alongside mentioned topics, within one shared budget. `Local` conditions are evaluated from a snapshot of the NPC's script variables.
 
 ## Dev setup
 

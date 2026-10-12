@@ -1,6 +1,8 @@
--- A lorebook built from the game's own dialogue. When a dialogue topic (such as "ring") is mentioned in the
--- conversation, the NPC's vanilla answer to that topic is added to the prompt, so the model knows what the NPC
--- would say if the player clicked the topic. Only mentioned topics are included, within a token budget.
+-- A lorebook built from the game's own dialogue. The NPC's vanilla answers to dialogue topics are added to the
+-- prompt, so the model knows what the NPC would say if the player clicked the topic. Included, within a budget:
+--   1. the NPC's own topic (named after them, e.g. "Vodunius Nuccius"), where vanilla keeps their personal story;
+--   2. topics mentioned in the conversation (e.g. "ring");
+--   3. the NPC's other personal topics (topics with lines written specifically for them).
 --
 -- Vanilla picks the first response whose filters and conditions all pass. Lua can evaluate most of them.
 -- The speaker's mwscript variables come from a snapshot taken by the global script (scripts/llm/global.lua).
@@ -16,6 +18,26 @@ local budget = require('scripts.llm.budget')
 local M = {}
 
 local topicIndex = nil
+-- npc record id -> list of topic records that have lines written for that NPC
+local personalIndex = nil
+
+local function getPersonalTopics(recordId)
+    if not personalIndex then
+        personalIndex = {}
+        for _, record in pairs(core.dialogue.topic.records) do
+            local seen = {}
+            for _, info in ipairs(record.infos) do
+                local actor = info.filterActorId and info.filterActorId:lower()
+                if actor and not seen[actor] then
+                    seen[actor] = true
+                    personalIndex[actor] = personalIndex[actor] or {}
+                    table.insert(personalIndex[actor], record)
+                end
+            end
+        end
+    end
+    return personalIndex[recordId:lower()] or {}
+end
 
 -- All topic names, longest first so "little secret" wins over "secret"
 local function getTopicIndex()
@@ -223,13 +245,43 @@ end
 function M.build(npc, player, texts, expand, limits, locals)
     local ctx = M.newContext(npc, player, locals, false)
 
-    local lines = {}
-    local perTopic = math.floor(limits.knowledgeTokens / math.max(1, limits.maxTopics))
-    for _, topic in ipairs(M.findTopics(texts, limits.maxTopics)) do
-        local found, text = pcall(M.responseFor, topic.id, ctx)
-        if found and text then
-            text = budget.truncate((expand(text):gsub('%s+', ' ')), perTopic)
-            lines[#lines + 1] = string.format('- About "%s", %s would say: %s', topic.name, ctx.npcRecord.name, text)
+    -- Candidate topics in priority order: own topic, mentioned topics, other personal topics
+    local npcName = ctx.npcRecord.name:lower()
+    local own, others = {}, {}
+    for _, record in ipairs(getPersonalTopics(npc.recordId)) do
+        local entry = { id = record.id, name = record.name }
+        if record.name:lower() == npcName then
+            own[#own + 1] = entry
+        else
+            others[#others + 1] = entry
+        end
+    end
+    table.sort(others, function(a, b)
+        return a.name < b.name
+    end)
+    local candidates = {}
+    for _, list in ipairs({ own, M.findTopics(texts, limits.maxTopics), others }) do
+        for _, topic in ipairs(list) do
+            candidates[#candidates + 1] = topic
+        end
+    end
+
+    -- The budget is shared, not split evenly: earlier (more important) topics can use what they need, so the
+    -- NPC's own story isn't cut short; only the topic that overflows the remaining budget is truncated.
+    local lines, seen = {}, {}
+    local remaining = limits.knowledgeTokens
+    for _, topic in ipairs(candidates) do
+        if #lines >= limits.maxTopics or remaining < 30 then
+            break
+        end
+        if not seen[topic.id] then
+            seen[topic.id] = true
+            local found, text = pcall(M.responseFor, topic.id, ctx)
+            if found and text then
+                text = budget.truncate((expand(text):gsub('%s+', ' ')), remaining)
+                remaining = remaining - budget.estimateTokens(text)
+                lines[#lines + 1] = string.format('- About "%s", %s would say: %s', topic.name, ctx.npcRecord.name, text)
+            end
         end
     end
     if #lines == 0 then

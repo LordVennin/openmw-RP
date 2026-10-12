@@ -105,6 +105,18 @@ namespace MWGui
         void activated() override;
     };
 
+    // A choice added by a Lua script (openmw.llm); clicking it sends a "choice:<id>" dialogue action
+    struct LuaChoice : Link
+    {
+        MyGUI::delegates::MultiDelegate<const std::string&> eventLuaChoiceActivated;
+        LuaChoice(const std::string& id)
+            : mChoiceId(id)
+        {
+        }
+        std::string mChoiceId;
+        void activated() override;
+    };
+
     struct Goodbye : Link
     {
         MyGUI::delegates::MultiDelegate<> eventActivated;
@@ -160,6 +172,10 @@ namespace MWGui
         /// A non-empty `recallLabel` shows a button next to the input that sends the "recall" dialogue action.
         void setTextInput(bool visible, bool enabled, std::string_view hint, std::string_view recallLabel);
 
+        /// Clickable choices from Lua scripts, drawn like vanilla dialogue choices: pairs of (id, label).
+        /// An empty list removes them.
+        void setLuaChoices(std::vector<std::pair<std::string, std::string>> choices);
+
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
 
@@ -186,6 +202,7 @@ namespace MWGui
 
         void onTextInputAccept(MyGUI::EditBox* sender);
         void onRecallClicked(MyGUI::Widget* sender);
+        void onLuaChoiceActivated(const std::string& id);
 
         void updateHistory(bool scrollbar = false);
 
@@ -204,6 +221,7 @@ namespace MWGui
 
         std::vector<std::unique_ptr<DialogueText>> mHistoryContents;
         std::vector<std::pair<std::string, int>> mChoices;
+        std::vector<std::pair<std::string, std::string>> mLuaChoices;
         std::vector<BookTypesetter::Style*> mChoiceStyles;
         bool mGoodbye;
 
