@@ -160,30 +160,43 @@ function M.prompt(template, npcName, playerName, exchange, candidates)
     return promptText(template, system, lines)
 end
 
--- The offer check, before the reply: does the player hand one of their items or gold to the NPC in this line?
--- Doing this first lets the reply react to the handover (and to the vanilla quest reaction and rewards).
+-- What the player does in their line, decided before the NPC replies. One check covers giving items, persuasion
+-- (admire, intimidate, taunt) and followers (follow, wait, dismiss); a live test of 28 tricky lines got all right.
+M.INTENTS = { 'none', 'give', 'admire', 'intimidate', 'taunt', 'follow', 'wait', 'dismiss' }
+
 -- @param npcLastLine what the NPC said just before (for amounts like "the money you need"), or nil
-function M.offerPrompt(template, npcName, playerName, userLine, candidates, npcLastLine)
-    local system = 'You are the game master of a Morrowind role-play. Decide whether ' .. playerName .. ' gives, '
-        .. 'or is giving, one of their items or gold to ' .. npcName .. ' in their latest line, for example '
-        .. '"here, take it", "have some gold" or "here is the money you asked for". Saying "I could give you..." or '
-        .. '"let me give you..." while reaching for or handing over the item also counts. Questions, refusals, '
-        .. 'haggling and offers with a condition ("if you...") do not count. Answer with JSON only.'
+function M.intentPrompt(template, npcName, playerName, userLine, candidates, npcLastLine)
+    local system = 'You are the game master of a Morrowind role-play. Classify what ' .. playerName .. ' does to '
+        .. npcName .. ' in their latest line. Intents:\n'
+        .. '- give: ' .. playerName .. ' hands one of their items or gold to ' .. npcName .. ' now ("here, take it", '
+        .. '"have some gold", "here is the money you asked for").\n'
+        .. '- admire: ' .. playerName .. ' flatters or compliments ' .. npcName .. '.\n'
+        .. '- intimidate: ' .. playerName .. ' threatens ' .. npcName .. ', menaces them, or pulls rank to force them.\n'
+        .. '- taunt: ' .. playerName .. ' insults or mocks ' .. npcName .. '.\n'
+        .. '- follow: ' .. playerName .. ' asks ' .. npcName .. ' to come along with them or follow them.\n'
+        .. '- wait: ' .. playerName .. ' asks ' .. npcName .. ' to wait or stay where they are.\n'
+        .. '- dismiss: ' .. playerName .. ' tells ' .. npcName .. ' to stop following, go home, or leave their company.\n'
+        .. '- none: anything else, including questions, offers with a condition, and words like "follow" or "wait" '
+        .. 'used another way.\n'
+        .. 'Answer with JSON only.'
     local lines = {}
     if npcLastLine and npcLastLine ~= '' then
         lines[#lines + 1] = npcName .. ' (just before): ' .. npcLastLine
     end
     lines[#lines + 1] = playerName .. ': ' .. userLine
     lines[#lines + 1] = ''
-    lines[#lines + 1] = 'Items ' .. playerName .. ' carries that could be involved (id - name - count):'
+    lines[#lines + 1] = 'Items ' .. playerName .. ' carries that could be given (id - name - count):'
     for _, c in ipairs(candidates) do
         lines[#lines + 1] = string.format('%s - %s - %d', c.id, c.name or c.id, c.playerCount)
     end
+    if #candidates == 0 then
+        lines[#lines + 1] = '(none)'
+    end
     lines[#lines + 1] = ''
-    lines[#lines + 1] = 'Answer as {"evidence": the exact words from ' .. playerName .. '\'s latest line where '
-        .. playerName .. ' hands the item or gold over, or "none" if there are no such words, "item": item id or '
-        .. '"none", "count": number}. For "count", use the amount named in the conversation (for example a price '
-        .. npcName .. ' asked for); only if no amount was named, use 1 for items.'
+    lines[#lines + 1] = 'Answer as {"evidence": the exact words from ' .. playerName .. '\'s latest line that show '
+        .. 'the intent, or "none", "intent": one of the intents, "item": item id or "none" (only for give), "count": '
+        .. 'number (only for give; use the amount named in the conversation, for example a price ' .. npcName
+        .. ' asked for)}.'
     return promptText(template, system, lines)
 end
 
@@ -204,6 +217,22 @@ function M.schemaJson(candidates)
         .. '"item":{"enum":[%s]},"count":{"type":"integer","minimum":0,"maximum":%d}},'
         .. '"required":["evidence","item","count"]}', MAX_EVIDENCE_LENGTH, table.concat(quoted, ','),
         schema.properties.count.maximum)
+end
+
+-- Schema for the intent check: evidence first, then the intent, then item and count
+function M.intentSchemaJson(candidates)
+    local schema = M.schema(candidates)
+    local items, intents = {}, {}
+    for i, v in ipairs(schema.properties.item.enum) do
+        items[i] = jsonString(v)
+    end
+    for i, v in ipairs(M.INTENTS) do
+        intents[i] = jsonString(v)
+    end
+    return string.format('{"type":"object","properties":{"evidence":{"type":"string","maxLength":%d},'
+        .. '"intent":{"enum":[%s]},"item":{"enum":[%s]},"count":{"type":"integer","minimum":0,"maximum":%d}},'
+        .. '"required":["evidence","intent","item","count"]}', MAX_EVIDENCE_LENGTH, table.concat(intents, ','),
+        table.concat(items, ','), schema.properties.count.maximum)
 end
 
 -- Encodes a check's request body with the schema spliced in, keeping its property order
@@ -262,6 +291,27 @@ function M.parse(answer, candidates, direction, judgedText)
                 return nil
             end
             return { transfer = direction, item = c.id, name = c.name, count = count }
+        end
+    end
+    return nil
+end
+
+-- Turns the intent check's answer into { intent, transfer } (transfer only for give), or nil for nothing.
+-- The intent counts only if its evidence really appears in the player's line.
+function M.parseIntent(answer, candidates, userLine)
+    if type(answer) ~= 'table' or type(answer.intent) ~= 'string' or answer.intent == 'none' then
+        return nil
+    end
+    if not M.evidenceFound(answer.evidence, userLine or '') then
+        return nil
+    end
+    if answer.intent == 'give' then
+        local transfer = M.parse(answer, candidates, M.PLAYER_GIVES, userLine)
+        return transfer and { intent = 'give', transfer = transfer } or nil
+    end
+    for _, intent in ipairs(M.INTENTS) do
+        if intent == answer.intent then
+            return { intent = intent }
         end
     end
     return nil

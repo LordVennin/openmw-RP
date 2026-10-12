@@ -129,11 +129,13 @@ set(BUILTIN_DATA_FILES
     scripts/llm/actions.lua
     scripts/llm/budget.lua
     scripts/llm/cards.lua
+    scripts/llm/followers.lua
     scripts/llm/generated.lua
     scripts/llm/global.lua
     scripts/llm/handover.lua
     scripts/llm/knowledge.lua
     scripts/llm/lorebook.lua
+    scripts/llm/persuasion.lua
     scripts/llm/player.lua
     scripts/llm/prompt.lua
     scripts/llm/sanitize.lua

@@ -1,5 +1,5 @@
--- Global half of AI dialogue: applies validated item exchanges and quest effects, which player scripts can't do,
--- and reads NPCs' mwscript variables for the dialogue filters.
+-- Global half of AI dialogue: applies validated item exchanges, quest effects, persuasion and followers, which
+-- player scripts can't do, and reads NPCs' mwscript variables for the dialogue filters.
 
 local types = require('openmw.types')
 local world = require('openmw.world')
@@ -17,6 +17,67 @@ local deferred = {}
 
 local function clampDisposition(delta)
     return math.max(-MAX_DISPOSITION_CHANGE, math.min(MAX_DISPOSITION_CHANGE, delta))
+end
+
+-- NPCs following the player because of an AI conversation: npc id -> { npc, player, state, home, reason }.
+-- state is 'following', 'waiting' or 'goingHome'; home is { cellName, position } where they were recruited.
+-- Saved with the game.
+local followers = {}
+local followerCheckTimer = 0
+
+local function homeOf(npc)
+    local cell = npc.cell
+    return { cellName = cell.isExterior and '' or cell.name, position = npc.position }
+end
+
+local function startFollowing(data)
+    local npc, player = data.npc, data.player
+    local entry = followers[npc.id] or { npc = npc, home = homeOf(npc) }
+    entry.player = player
+    entry.state = 'following'
+    entry.reason = data.reason or entry.reason
+    followers[npc.id] = entry
+    npc:sendEvent('RemoveAIPackages', 'Wander')
+    npc:sendEvent('StartAIPackage', { type = 'Follow', target = player })
+end
+
+local function wait(data)
+    local entry = followers[data.npc.id]
+    if not entry then
+        return
+    end
+    entry.state = 'waiting'
+    data.npc:sendEvent('RemoveAIPackages', 'Follow')
+    data.npc:sendEvent('StartAIPackage', { type = 'Wander', distance = 0 })
+end
+
+local function dismiss(data)
+    local entry = followers[data.npc.id]
+    if not entry then
+        return
+    end
+    entry.state = 'goingHome'
+    data.npc:sendEvent('RemoveAIPackages', 'Follow')
+end
+
+-- Dismissed followers are sent home once the player is elsewhere, so it never happens in sight
+local function updateFollowers(dt)
+    followerCheckTimer = followerCheckTimer + dt
+    if followerCheckTimer < 1 then
+        return
+    end
+    followerCheckTimer = 0
+    for id, entry in pairs(followers) do
+        local npc = entry.npc
+        if not npc:isValid() or types.Actor.isDead(npc) then
+            followers[id] = nil
+        elseif entry.state == 'goingHome' and entry.player:isValid() and npc.cell ~= entry.player.cell then
+            npc:teleport(entry.home.cellName, entry.home.position)
+            npc:sendEvent('RemoveAIPackages', 'Wander')
+            followers[id] = nil
+            print('LLM followers: sent ' .. npc.recordId .. ' home')
+        end
+    end
 end
 
 local function applyDeferred(actor)
@@ -179,11 +240,13 @@ end
 return {
     engineHandlers = {
         onActorActive = applyDeferred,
+        onUpdate = updateFollowers,
         onSave = function()
-            return { version = 1, deferred = deferred }
+            return { version = 2, deferred = deferred, followers = followers }
         end,
         onLoad = function(data)
-            deferred = (data and data.version == 1 and data.deferred) or {}
+            deferred = (data and data.deferred) or {}
+            followers = (data and data.version == 2 and data.followers) or {}
         end,
     },
     eventHandlers = {
@@ -193,6 +256,23 @@ return {
         end,
         LLMSetLocals = function(data)
             applyEffects(data.player, data.npc, { locals = data.locals })
+        end,
+        -- Persuasion: a temporary change during the conversation, then the final value when it ends
+        LLMModDisposition = function(data)
+            types.NPC.modifyBaseDisposition(data.npc, data.player, clampDisposition(data.delta))
+        end,
+        LLMSetBaseDisposition = function(data)
+            types.NPC.setBaseDisposition(data.npc, data.player, math.max(0, math.min(100, data.value)))
+        end,
+        LLMFollow = startFollowing,
+        LLMWait = wait,
+        LLMDismiss = dismiss,
+        LLMGetFollowers = function(data)
+            local list = {}
+            for _, entry in pairs(followers) do
+                list[#list + 1] = { npc = entry.npc, state = entry.state, reason = entry.reason }
+            end
+            data.player:sendEvent('LLMFollowers', { followers = list })
         end,
     },
 }

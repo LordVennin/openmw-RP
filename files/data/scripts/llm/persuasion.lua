@@ -1,0 +1,126 @@
+-- Vanilla persuasion (Admire, Intimidate, Taunt) for AI conversations, ported from
+-- MWMechanics::MechanicsManager::getPersuasionDispositionChange (apps/openmw/mwmechanics/mechanicsmanagerimp.cpp).
+-- The model only classifies what the player said; whether it works, and by how much, comes from the player's and
+-- the NPC's stats exactly as in vanilla. Pure functions: callers pass stats, GMSTs and the dice roll.
+
+local M = {}
+
+M.TYPES = { admire = 'admire', intimidate = 'intimidate', taunt = 'taunt' }
+
+-- Vanilla values from Morrowind.esm, used when a GMST can't be read
+M.DEFAULT_GMST = {
+    fPersonalityMod = 5,
+    fLuckMod = 10,
+    fReputationMod = 1,
+    fLevelMod = 5,
+    fPerDieRollMult = 0.3,
+    fPerTempMult = 1,
+    iPerMinChance = 5,
+    iPerMinChange = 10,
+    fFatigueBase = 1.25,
+    fFatigueMult = 0.5,
+}
+
+-- C++ int() truncates toward zero
+local function trunc(x)
+    return x >= 0 and math.floor(x) or math.ceil(x)
+end
+
+-- CreatureStats::getFatigueTerm
+function M.fatigueTerm(stats, g)
+    local max = stats.fatigueMax or 0
+    local normalised = math.floor(max) == 0 and 1 or math.max(0, (stats.fatigueCurrent or 0) / max)
+    return g.fFatigueBase - g.fFatigueMult * (1 - normalised)
+end
+
+-- getPersuasionRatings: rating1 and rating2 (rating3 is only used for bribes)
+-- @param stats { speechcraft, personality, luck, reputation, level, fatigueCurrent, fatigueMax }
+function M.ratings(stats, isPlayer, g)
+    local persTerm = stats.personality / g.fPersonalityMod
+    local luckTerm = stats.luck / g.fLuckMod
+    local repTerm = stats.reputation * g.fReputationMod
+    local fatigue = M.fatigueTerm(stats, g)
+    local levelTerm = stats.level * g.fLevelMod
+    local rating1 = (repTerm + luckTerm + persTerm + stats.speechcraft) * fatigue
+    local rating2
+    if isPlayer then
+        rating2 = rating1 + levelTerm
+    else
+        rating2 = (levelTerm + repTerm + luckTerm + persTerm + stats.speechcraft) * fatigue
+    end
+    return rating1, rating2
+end
+
+-- @param kind M.TYPES value
+-- @param disposition the NPC's current (derived) disposition, 0-100
+-- @param roll 0-99
+-- @return { success = bool, temp = int, perm = int }: temp applies during the conversation, perm afterwards
+function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
+    local g = gmst or M.DEFAULT_GMST
+    local npc1, npc2 = M.ratings(npcStats, false, g)
+    local pl1, pl2 = M.ratings(playerStats, true, g)
+
+    local d = 1 - 0.02 * math.abs(disposition - 50)
+    local target1 = d * (pl1 - npc1 + 50)
+    local target2 = d * (pl2 - npc2 + 50)
+    local minChance, minChange = g.iPerMinChance, g.iPerMinChange
+    local dieMult, tempMult = g.fPerDieRollMult, g.fPerTempMult
+
+    local success, x, y = false, 0, 0
+    if kind == M.TYPES.admire then
+        target1 = math.max(minChance, target1)
+        success = roll <= target1
+        local c = math.floor(dieMult * (target1 - roll))
+        x = success and math.max(minChange, c) or c
+    elseif kind == M.TYPES.intimidate then
+        target2 = math.max(minChance, target2)
+        success = roll <= target2
+        local r = roll ~= target2 and math.floor(target2 - roll) or 1
+        local c = -math.abs(math.floor(r * dieMult))
+        if success then
+            if math.abs(c) < minChange then
+                x = minChange -- OpenMW's fix for marginal wins
+                y = x
+            else
+                x = -math.floor(c * tempMult)
+                y = c
+            end
+        else
+            x = math.floor(c * tempMult)
+            y = c
+        end
+    elseif kind == M.TYPES.taunt then
+        target1 = math.max(minChance, target1)
+        success = roll <= target1
+        local c = math.abs(math.floor(target1 - roll))
+        x = math.floor(-c * dieMult)
+        if success and math.abs(x) < minChange then
+            x = -minChange
+        end
+    else
+        error('unknown persuasion type ' .. tostring(kind))
+    end
+
+    local temp, perm
+    if kind == M.TYPES.intimidate then
+        temp = trunc(x)
+    else
+        temp = trunc(x * tempMult)
+    end
+    if disposition + temp > 100 then
+        temp = 100 - disposition
+    elseif disposition + temp < 0 then
+        temp = -disposition
+    end
+    if kind == M.TYPES.intimidate then
+        perm = success and -trunc(temp / tempMult) or trunc(y)
+    else
+        perm = trunc(temp / tempMult)
+    end
+    return { success = success, temp = temp, perm = perm }
+end
+
+-- Repeating the same kind of attempt in one conversation stops working, so flattery can't be spammed
+M.MAX_ATTEMPTS_PER_KIND = 2
+
+return M

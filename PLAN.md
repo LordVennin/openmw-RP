@@ -75,8 +75,11 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
   - [x] item and gold exchange, confirmed with dialogue choices
   - [x] quest effects and rewards taken from vanilla handover dialogue
   - [x] starter lorebook
+  - [x] persuasion by conversation (admire, intimidate, taunt) with vanilla's formula and the player's stats
+  - [x] followers: follow, wait, go home
   - [ ] rolling memory summaries
-  - [ ] other actions (disposition from conversation, attack/follow/end talk)
+  - [ ] other actions (attack, ending the conversation)
+  - [ ] running vanilla result scripts faithfully (needs an engine binding to execute MWScript)
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
@@ -116,6 +119,28 @@ The player talks to any NPC in their own words from the vanilla dialogue window.
 - faction reputation.
 
 If the player doesn't name an amount, the quest's required amount is offered (e.g. Vodunius Nuccius's 100 drakes). The vanilla reaction line and rewards are given to the model, so the reply plays them out. Optional `llm/quests/*.json` hooks can override auto-detection.
+
+**Intent check:** one check before each reply classifies the player's line as give, admire, intimidate, taunt, follow, wait, dismiss or none. It uses the same evidence-quote method, and got 28/28 live test lines right, including negatives like "should I follow the road north?".
+
+**Persuasion:** `persuasion.lua` is a line-for-line port of `MechanicsManager::getPersuasionDispositionChange`, using the player's and NPC's Speechcraft, Personality, Luck, Reputation, Level and fatigue, and the game's GMSTs. Like vanilla:
+- the change is temporary while talking, and only the permanent part remains when the window closes (a successful threat makes the NPC cooperative now and resentful later);
+- Speechcraft trains on success and failure;
+- the same approach used more than twice in one conversation has no effect.
+
+The model is told the outcome in words, never numbers, and only the bar shows the change.
+
+**Followers:** whether an NPC agrees is decided by `followers.lua`, in this order:
+1. **NPCs moved by quests refuse:** their own script, or their vanilla dialogue, calls AiFollow/AiEscort/AiTravel.
+2. **Essential NPCs refuse.**
+3. **Coerced or outranked NPCs agree even if they dislike the player:** a successful threat in this conversation, or the player outranks them in their faction.
+4. **NPCs who like the player agree:** disposition 70, or 85 for NPCs with a job.
+
+The reply comes first, then "Take X along" / "Never mind". `global.lua` keeps a saved follower registry:
+- following uses a Follow package, so the NPC goes through doors and fights alongside the player;
+- "wait" stands them still;
+- "go home" teleports them home once the player has left the cell.
+
+Notices mark each change.
 
 **Knowledge:** an NPC's own topic and their personal topics are always known, alongside mentioned topics, within one shared budget. `Local` conditions are evaluated from a snapshot of the NPC's script variables.
 
