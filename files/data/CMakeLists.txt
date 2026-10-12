@@ -133,6 +133,7 @@ set(BUILTIN_DATA_FILES
     scripts/llm/global.lua
     scripts/llm/handover.lua
     scripts/llm/knowledge.lua
+    scripts/llm/lorebook.lua
     scripts/llm/player.lua
     scripts/llm/prompt.lua
     scripts/llm/sanitize.lua
@@ -141,6 +142,7 @@ set(BUILTIN_DATA_FILES
     scripts/llm/templates.lua
     l10n/LLMDialogue/en.yaml
     llm/cards/fargoth.json
+    llm/lore/vvardenfell_basics.json
 
     builtin.omwscripts
 

@@ -1,0 +1,273 @@
+{
+  "entries": {
+    "0": {
+      "uid": 0,
+      "key": [
+        "Vvardenfell",
+        "the island"
+      ],
+      "keysecondary": [],
+      "comment": "Vvardenfell",
+      "content": "Vvardenfell is a large island district in the north of the province of Morrowind, home of the Dunmer (dark elves). Red Mountain, an active volcano, rises at its centre and covers the land in ash; the Ghostfence, a great magical barrier maintained by the Temple, rings the mountain. Three Great Houses hold land here: Hlaalu in the west and south, Redoran in the north-west, and Telvanni in the east. The Empire rules through Duke Vedam Dren in Ebonheart. Outlanders arriving by ship are processed at Seyda Neen.",
+      "constant": false,
+      "selective": false,
+      "order": 100,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "1": {
+      "uid": 1,
+      "key": [
+        "Seyda Neen"
+      ],
+      "keysecondary": [],
+      "comment": "Seyda Neen",
+      "content": "Seyda Neen is a small, damp fishing and port village on the Bitter Coast swamps of south-western Vvardenfell. Imperial prisoners and other new arrivals come ashore here and are processed at the Census and Excise Office, where Captain Sellus Gravius commands the guards. The village has a lighthouse, a few homes, Arrille's Tradehouse (Arrille is a male Altmer trader who also runs a small bar upstairs) and a silt strider port with travel to Balmora, Suran, Vivec and Gnisis. Locals include the nervous Bosmer Fargoth, the Redguard scout Elone and the Nord guard Hrisskar Flat-Foot.",
+      "constant": false,
+      "selective": false,
+      "order": 100,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "2": {
+      "uid": 2,
+      "key": [
+        "Census and Excise",
+        "Census Office",
+        "Excise Office"
+      ],
+      "keysecondary": [],
+      "comment": "Census and Excise Office",
+      "content": "The Census and Excise Office at Seyda Neen is the Imperial customs post for southern Vvardenfell. It records every new arrival, collects import duties and taxes, and holds the paperwork of released prisoners. It is run by Captain Sellus Gravius, a stern but fair Imperial officer, with a small garrison of Imperial guards. A tax collector from the office travels the countryside to collect what is owed.",
+      "constant": false,
+      "selective": false,
+      "order": 95,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "3": {
+      "uid": 3,
+      "key": [
+        "Balmora"
+      ],
+      "keysecondary": [],
+      "comment": "Balmora",
+      "content": "Balmora is the largest city of western Vvardenfell and the seat of House Hlaalu on the island, built along both banks of the Odai River. It has guildhalls of the Fighters Guild and the Mages Guild, a Temple, the Hlaalu council manor, several taverns such as the Eight Plates and the Lucky Lockup, and a silt strider port. Fort Moonmoth, an Imperial Legion fort, stands just outside the city. The Camonna Tong, a Dunmer criminal gang hostile to outlanders, is strong in Balmora, and the Thieves Guild meets at the South Wall Cornerclub.",
+      "constant": false,
+      "selective": false,
+      "order": 100,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "4": {
+      "uid": 4,
+      "key": [
+        "Tribunal",
+        "Temple",
+        "Almsivi",
+        "ALMSIVI"
+      ],
+      "keysecondary": [],
+      "comment": "The Tribunal Temple",
+      "content": "The Tribunal Temple is the state religion of the Dunmer. It worships three living gods, Almalexia, Sotha Sil and Vivec, together called ALMSIVI, along with saints and the veneration of ancestors. Temple priests heal, preach and guide pilgrims to holy shrines, and armoured Ordinators enforce its law and guard Vivec City. The Temple forbids the worship of Daedra other than the approved Good Daedra, distrusts the foreign Imperial Cult, and teaches that the Tribunal protects Morrowind from the evil of Red Mountain.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "5": {
+      "uid": 5,
+      "key": [
+        "Vivec",
+        "Almalexia",
+        "Sotha Sil"
+      ],
+      "keysecondary": [],
+      "comment": "The three gods of the Tribunal",
+      "content": "Vivec, the warrior-poet, lives in his palace in Vivec City, the great city of cantons on Vvardenfell's southern coast. Almalexia, the mother of Morrowind, rules from Mournhold on the mainland. Sotha Sil, the mysterious sorcerer, dwells apart in his Clockwork City. The Temple teaches that the three gained divinity long ago and still guard Morrowind, and that Vivec's power maintains the Ghostfence around Red Mountain. Vivec also signed the Armistice that brought Morrowind into the Empire peacefully.",
+      "constant": false,
+      "selective": false,
+      "order": 85,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "6": {
+      "uid": 6,
+      "key": [
+        "Great House",
+        "Great Houses",
+        "House Dres",
+        "House Indoril",
+        "Grand Council"
+      ],
+      "keysecondary": [],
+      "comment": "The Great Houses",
+      "content": "The Great Houses are the ruling Dunmer noble houses of Morrowind, who meet in the Grand Council. Three hold land on Vvardenfell: Hlaalu, Redoran and Telvanni. The others, Indoril and Dres, are powerful on the mainland; Indoril is closely tied to the Temple, and Dres runs plantations worked by slaves. The houses compete for land, trade and influence, and outlanders can rise in a house by serving it.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "7": {
+      "uid": 7,
+      "key": [
+        "Hlaalu",
+        "House Hlaalu"
+      ],
+      "keysecondary": [],
+      "comment": "House Hlaalu",
+      "content": "House Hlaalu is the Great House of merchants and politicians, the most friendly to the Empire and to outlanders. It controls Balmora, much of Vivec City and the trade of western Vvardenfell. Hlaalu members value profit, cleverness and connections, and the house is known for bribery and corruption; some of its nobles are said to protect the Camonna Tong. Other Dunmer often see Hlaalu as too eager to please the Empire.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "8": {
+      "uid": 8,
+      "key": [
+        "Redoran",
+        "House Redoran"
+      ],
+      "keysecondary": [],
+      "comment": "House Redoran",
+      "content": "House Redoran is the Great House of warriors, known for duty, honour, piety and plain living. Its seat on Vvardenfell is Ald'ruhn, built in the shell of a giant crab on the ashlands of the north-west. Redoran nobles distrust the Empire's influence but keep their word, and they bear the burden of defending the island against the creatures of Red Mountain.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "9": {
+      "uid": 9,
+      "key": [
+        "Telvanni",
+        "House Telvanni"
+      ],
+      "keysecondary": [],
+      "comment": "House Telvanni",
+      "content": "House Telvanni is the Great House of powerful, reclusive wizard-lords who live in giant mushroom towers on the eastern coast and islands of Vvardenfell, such as Sadrith Mora and Tel Branora. Telvanni value magical power above all, care little for the law, the Temple or the Empire, and keep slaves. Their mages compete ruthlessly with each other, and outlanders are welcome only if they are useful.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "10": {
+      "uid": 10,
+      "key": [
+        "Empire",
+        "Imperial",
+        "Imperials",
+        "Legion",
+        "Imperial Legion",
+        "Emperor",
+        "Uriel Septim",
+        "Duke"
+      ],
+      "keysecondary": [],
+      "comment": "The Empire",
+      "content": "Morrowind has been part of the Tamrielic Empire since the Armistice signed by Vivec and Tiber Septim, which let the Dunmer keep their Great Houses, their Temple and the trade in slaves. Emperor Uriel Septim VII rules from the Imperial City, and on Vvardenfell Duke Vedam Dren governs from Ebonheart. The Imperial Legion keeps forts and guards across the island, and Imperial institutions such as the Imperial Cult, the Fighters Guild, the Mages Guild and the East Empire Company are common. Many Dunmer resent the Empire and its outlander settlers.",
+      "constant": false,
+      "selective": false,
+      "order": 85,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "11": {
+      "uid": 11,
+      "key": [
+        "Sixth House",
+        "Dagoth",
+        "Dagoth Ur",
+        "Red Mountain",
+        "Blight",
+        "corprus"
+      ],
+      "keysecondary": [],
+      "comment": "Rumours of Red Mountain",
+      "content": "Common folk whisper about trouble from Red Mountain: blight storms, diseased animals, strange ash creatures and a sickness called corprus. Dagoth Ur, an ancient enemy of the Tribunal, is said to be sealed inside the mountain behind the Ghostfence. There are rumours of a secret Sixth House cult that sends dreams to sleepers and hides in caves and ancestral tombs. Most people only know these things as fearful rumours.",
+      "constant": false,
+      "selective": false,
+      "order": 80,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    },
+    "12": {
+      "uid": 12,
+      "key": [
+        "gold",
+        "coin",
+        "coins",
+        "drake",
+        "drakes",
+        "septim",
+        "septims",
+        "money",
+        "price"
+      ],
+      "keysecondary": [],
+      "comment": "Money",
+      "content": "Money in Morrowind is counted in gold coins, called drakes, also known as septims. Prices are given simply in gold, for example 'fifty gold' or 'twenty drakes'. Merchants buy and sell for gold, and many deals also involve trading goods or favours.",
+      "constant": false,
+      "selective": false,
+      "order": 70,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4
+    }
+  }
+}

@@ -17,6 +17,7 @@ local generated = require('scripts.llm.generated')
 local handover = require('scripts.llm.handover')
 local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
+local lorebook = require('scripts.llm.lorebook')
 local prompt = require('scripts.llm.prompt')
 local sanitize = require('scripts.llm.sanitize')
 local scene = require('scripts.llm.scene')
@@ -363,6 +364,17 @@ local function sendLine(npc, rawText)
         notes[#notes + 1] = knowledgeNote
     elseif not ok then
         print('LLM knowledge: ' .. tostring(knowledgeNote))
+    end
+    -- Lore for what is mentioned and for where the conversation happens
+    local place = npc.cell and npc.cell.name or ''
+    if npc.cell and npc.cell.region and core.regions.records[npc.cell.region] then
+        place = place .. '\n' .. core.regions.records[npc.cell.region].name
+    end
+    local okLore, loreNote = pcall(lorebook.build, { userText, lastNpcLine, place }, limits)
+    if okLore and loreNote then
+        notes[#notes + 1] = loreNote
+    elseif not okLore then
+        print('LLM lorebook: ' .. tostring(loreNote))
     end
     -- Things that happened in this conversation, such as items changing hands
     if #history.events > 0 then

@@ -42,6 +42,8 @@ function M.fromContextSize(contextSize, replyTokens, overrides)
         sceneTokens = math.floor(250 + 100 * level),
         knowledgeTokens = math.floor(300 + 150 * level),
         maxTopics = math.floor(3 + level),
+        loreTokens = math.floor(350 + 200 * level),
+        maxLoreEntries = math.floor(3 + level),
         recentEvents = 3,
         actionCandidates = 8,
         maxPeople = math.floor(4 + 2 * level),
