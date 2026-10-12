@@ -6,11 +6,30 @@ local world = require('openmw.world')
 
 local MAX_ITEM_COUNT = 10
 local MAX_GOLD = 1000
-local MAX_DISPOSITION_CHANGE = 20
+local MAX_DISPOSITION_CHANGE = 100
+local MAX_REWARD_COUNT = 5000
 local GOLD_ID = 'gold_001'
 
-local function itemName(recordId, inventory)
-    local item = inventory:find(recordId)
+-- Disposition changes for NPCs that weren't loaded when they were earned (e.g. Arrille, who is inside his
+-- tradehouse while the player talks to Fargoth outside): npc record id -> { player = object, delta = number }.
+-- Applied when the NPC becomes active; saved with the game.
+local deferred = {}
+
+local function clampDisposition(delta)
+    return math.max(-MAX_DISPOSITION_CHANGE, math.min(MAX_DISPOSITION_CHANGE, delta))
+end
+
+local function applyDeferred(actor)
+    local pending = deferred[actor.recordId:lower()]
+    if pending and types.NPC.objectIsInstance(actor) and pending.player and pending.player:isValid() then
+        types.NPC.modifyBaseDisposition(actor, pending.player, clampDisposition(pending.delta))
+        deferred[actor.recordId:lower()] = nil
+        print(string.format('LLM handover: applied deferred disposition %+d to %s', pending.delta, actor.recordId))
+    end
+end
+
+local function itemName(recordId, inventory, object)
+    local item = object or (inventory and inventory:find(recordId))
     if item then
         local ok, record = pcall(item.type.record, item)
         if ok and record and record.name then
@@ -75,9 +94,52 @@ local function applyEffects(player, npc, effects)
         end
     end
     if effects.disposition then
-        local delta = math.max(-MAX_DISPOSITION_CHANGE, math.min(MAX_DISPOSITION_CHANGE, effects.disposition))
+        local delta = clampDisposition(effects.disposition)
         types.NPC.modifyBaseDisposition(npc, player, delta)
         applied.disposition = delta
+    end
+    -- Other NPCs' disposition: now if they are loaded, otherwise when they next become active
+    for recordId, delta in pairs(effects.others or {}) do
+        local id = recordId:lower()
+        local current = deferred[id]
+        deferred[id] = { player = player, delta = (current and current.delta or 0) + delta }
+        for _, actor in ipairs(world.activeActors) do
+            if actor.recordId:lower() == id then
+                applyDeferred(actor)
+                break
+            end
+        end
+        applied.others = true
+    end
+    -- Item rewards from the vanilla script
+    applied.rewards = {}
+    for _, reward in ipairs(effects.rewards or {}) do
+        local count = math.min(reward.count or 1, MAX_REWARD_COUNT)
+        local ok, item = pcall(world.createObject, reward.id, count)
+        if ok and item then
+            local name = itemName(reward.id, nil, item)
+            item:moveInto(types.Actor.inventory(player))
+            applied.rewards[#applied.rewards + 1] = { name = name, count = count }
+        else
+            print('LLM handover: could not create reward ' .. tostring(reward.id))
+        end
+    end
+    -- Faction reputation; without a faction name it's the speaker's own faction
+    for _, change in ipairs(effects.factionRep or {}) do
+        local faction = change.faction
+        if not faction then
+            local ok, record = pcall(types.NPC.record, npc)
+            faction = ok and record and record.primaryFaction or nil
+        end
+        if faction and faction ~= '' then
+            local ok = pcall(function()
+                local current = types.NPC.getFactionReputation(player, faction)
+                types.NPC.setFactionReputation(player, faction, current + change.amount)
+            end)
+            if ok then
+                applied.factionRep = true
+            end
+        end
     end
     return applied
 end
@@ -101,9 +163,10 @@ local function onApplyTransfer(data)
             if data.effects then
                 result.applied = applyEffects(player, npc, data.effects)
                 print(string.format('LLM handover: %s gave %s to %s; vanilla line "%s" -> journal=%s locals=%s '
-                    .. 'disposition=%s', types.NPC.record(player).name, data.item, types.NPC.record(npc).name,
-                    tostring(data.effects.text), tostring(result.applied.journal), tostring(result.applied.locals),
-                    tostring(result.applied.disposition)))
+                    .. 'disposition=%s others=%s rewards=%d factionRep=%s', types.NPC.record(player).name, data.item,
+                    types.NPC.record(npc).name, tostring(data.effects.text), tostring(result.applied.journal),
+                    tostring(result.applied.locals), tostring(result.applied.disposition),
+                    tostring(result.applied.others), #result.applied.rewards, tostring(result.applied.factionRep)))
             end
         else
             result.error = 'not enough items'
@@ -114,6 +177,15 @@ local function onApplyTransfer(data)
 end
 
 return {
+    engineHandlers = {
+        onActorActive = applyDeferred,
+        onSave = function()
+            return { version = 1, deferred = deferred }
+        end,
+        onLoad = function(data)
+            deferred = (data and data.version == 1 and data.deferred) or {}
+        end,
+    },
     eventHandlers = {
         LLMApplyTransfer = onApplyTransfer,
         LLMGetLocals = function(data)
