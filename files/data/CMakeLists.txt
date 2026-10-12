@@ -135,6 +135,7 @@ set(BUILTIN_DATA_FILES
     scripts/llm/handover.lua
     scripts/llm/knowledge.lua
     scripts/llm/lorebook.lua
+    scripts/llm/memory.lua
     scripts/llm/npc.lua
     scripts/llm/persuasion.lua
     scripts/llm/player.lua

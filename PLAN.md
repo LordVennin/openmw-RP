@@ -68,7 +68,7 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [x] Phase 0: get a clean build of unmodified OpenMW running.
 - [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
 - [x] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
-- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`).
+- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`). Also a setting for how long an NPC refuses to talk after ending a conversation (off, short, or the current 24h/72h).
 - [x] Phase 3: write the Lua mod: card loader, prompt builder, chat window. Built as a text input inside the vanilla dialogue window (see below).
 - [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
 - [ ] Phase 4: add game actions, memory, and the lorebook. In progress:
@@ -77,8 +77,8 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
   - [x] starter lorebook
   - [x] persuasion by conversation (admire, intimidate, taunt) with vanilla's formula and the player's stats
   - [x] followers: follow, wait, go home
-  - [ ] rolling memory summaries
-  - [ ] other actions (attack, ending the conversation)
+  - [x] rolling memory summaries
+  - [x] other actions (attack, ending the conversation)
   - [ ] running vanilla result scripts faithfully (needs an engine binding to execute MWScript)
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
@@ -143,6 +143,15 @@ The reply comes first, then "Take X along" / "Never mind". `global.lua` keeps a 
 Notices mark each change.
 
 **Knowledge:** an NPC's own topic and their personal topics are always known, alongside mentioned topics, within one shared budget. `Local` conditions are evaluated from a snapshot of the NPC's script variables.
+
+**Hostility and ending the conversation:** Taunt and Intimidate change the NPC's Fight and Flee as in vanilla, through `npc.lua`, a CUSTOM script attached to the NPC (Fight can only be written by a script on the NPC itself). After each attempt, Lua computes the engine's fight term (`getFightTerm`): at 100 or more the NPC attacks, and from 80 they threaten the player. The model is told which, and can't start a fight on its own. The chat ends:
+- when the NPC attacks (the engine AI takes over once the window closes);
+- when disposition falls to 20 or less;
+- when an upset NPC's reply walks away (an evidence check, plus detection of actions like *walks away*).
+
+The player then sees a notice and a single Goodbye choice. The NPC refuses to talk for 24 game hours (72 after an attack), saved with the game.
+
+**Memory:** when a window closes on a history longer than 16 turns, everything but the last 8 turns is summarized in the background, merged with any earlier summary. The summary is saved, given to the model as `[What X remembers]` within its own budget share, and shown first in Recall.
 
 ## Dev setup
 

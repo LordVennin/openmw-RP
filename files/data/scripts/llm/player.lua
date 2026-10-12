@@ -20,6 +20,7 @@ local handover = require('scripts.llm.handover')
 local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
 local lorebook = require('scripts.llm.lorebook')
+local memory = require('scripts.llm.memory')
 local persuasion = require('scripts.llm.persuasion')
 local prompt = require('scripts.llm.prompt')
 local sanitize = require('scripts.llm.sanitize')
@@ -60,6 +61,9 @@ local followerStates = {}
 local blocked = {}
 -- Whether the NPC ended the AI conversation in the open dialogue window
 local chatEnded = false
+-- Memory summaries: NPCs with a summary request in flight, and results waiting for their window to close
+local summarizing = {}
+local deferredSummaries = {}
 
 local function isEnabled()
     return generalSettings:get('enabled') ~= false
@@ -146,7 +150,8 @@ local function responseInfo(e)
 end
 
 local function canRecall()
-    return not recalled and earlierTurns > 0
+    local history = dialogueNpc and histories[dialogueNpc.id]
+    return not recalled and (earlierTurns > 0 or (history ~= nil and history.summary ~= nil))
 end
 
 local function setInput(enabled, hint)
@@ -161,11 +166,14 @@ end
 -- Replays the saved conversation with the NPC into the dialogue window, styled like live chat
 local function recallConversation(npc)
     local history = histories[npc.id]
-    if recalled or not history or earlierTurns == 0 then
+    if recalled or not history or (earlierTurns == 0 and not history.summary) then
         return
     end
     recalled = true
     llm.addDialogueResponse('', { title = l10n('earlierConversation') })
+    if history.summary then
+        llm.addDialogueResponse(history.summary)
+    end
     for i = 1, math.min(earlierTurns, #history.turns) do
         local turn = history.turns[i]
         if turn.role == 'user' then
@@ -848,6 +856,9 @@ startReply = function(turn)
     card = generated.fit(card, limits.cardTokens)
 
     local notes = {}
+    if history.summary then
+        notes[#notes + 1] = '[What ' .. npcName .. ' remembers]\n' .. budget.truncate(history.summary, limits.memoryTokens)
+    end
     local sceneNote = scene.build(npc, self.object, advancedSettings:get('sceneDetail') or 'full', limits)
     if sceneNote then
         notes[#notes + 1] = sceneNote
@@ -966,6 +977,74 @@ local function sendLine(npc, rawText)
     end
 end
 
+local function applySummary(npc, pendingSummary)
+    local history = histories[npc.id]
+    if history and memory.apply(history, pendingSummary.count, pendingSummary.fingerprint, pendingSummary.text) then
+        print(string.format('LLM memory: summarized %d turns for %s', pendingSummary.count, npc.recordId))
+    end
+end
+
+-- When a long conversation ends, fold its older turns into the NPC's memory summary (in the background)
+local function startSummary(npc)
+    local history = histories[npc.id]
+    if summarizing[npc.id] or not memory.needsSummary(history) then
+        return
+    end
+    local count = memory.countToSummarize(history)
+    if count <= 0 then
+        return
+    end
+    local turns = {}
+    for i = 1, count do
+        turns[i] = history.turns[i]
+    end
+    local npcName = types.NPC.record(npc).name
+    local fingerprint = memory.fingerprint(history, count)
+    local body = {
+        prompt = memory.prompt(template(), npcName, history.summary, turns),
+        n_predict = 200,
+        temperature = 0.3,
+        stop = template().stop,
+    }
+    local id = llm.request(json.encode(body), async:callback(function(response)
+        summarizing[npc.id] = nil
+        local ok, err = pcall(function()
+            if not response.ok then
+                print('LLM memory: summary failed: ' .. tostring(response.error or response.status))
+                return
+            end
+            local data = json.decode(response.body)
+            local text = sanitize.reply(type(data) == 'table' and data.content or '',
+                { specialTokens = template().specialTokens, speakerName = npcName })
+            local result = { count = count, fingerprint = fingerprint, text = text }
+            if dialogueNpc == npc then
+                deferredSummaries[npc.id] = result -- apply when this conversation ends
+            else
+                applySummary(npc, result)
+            end
+        end)
+        if not ok then
+            print('LLM memory: ' .. tostring(err))
+        end
+    end), { endpoint = 'completion', timeout = REQUEST_TIMEOUT })
+    if id then
+        summarizing[npc.id] = true
+    end
+end
+
+-- A conversation with `npc` has ended: apply a waiting summary, then summarize if the history is long
+local function onConversationClosed(npc)
+    if not npc then
+        return
+    end
+    local waiting = deferredSummaries[npc.id]
+    if waiting then
+        deferredSummaries[npc.id] = nil
+        applySummary(npc, waiting)
+    end
+    startSummary(npc)
+end
+
 local function onUiModeChanged(data)
     if data.newMode == 'Dialogue' then
         local freshWindow = data.oldMode == nil
@@ -973,6 +1052,7 @@ local function onUiModeChanged(data)
             if dialogueNpc ~= data.arg then
                 cancelPending()
                 endConversation()
+                onConversationClosed(dialogueNpc)
                 freshWindow = true
             end
             dialogueNpc = data.arg
@@ -1007,7 +1087,9 @@ local function onUiModeChanged(data)
         -- The dialogue window (and every window on top of it) has closed
         cancelPending()
         endConversation()
+        local closed = dialogueNpc
         dialogueNpc = nil
+        onConversationClosed(closed)
     end
 end
 
@@ -1060,6 +1142,7 @@ local function onSave()
             greeting = history.greeting,
             turns = turns,
             events = events,
+            summary = history.summary,
             lastUsed = history.lastUsed,
         }
     end
