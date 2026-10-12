@@ -10,6 +10,11 @@
 #include <components/lua/asyncpackage.hpp>
 #include <components/lua/luastate.hpp>
 
+#include "../mwbase/environment.hpp"
+#include "../mwbase/windowmanager.hpp"
+#include "../mwgui/dialogue.hpp"
+#include "../mwgui/mode.hpp"
+
 #include "context.hpp"
 #include "luamanagerimp.hpp"
 
@@ -57,6 +62,32 @@ namespace MWLua
         };
 
         api["cancel"] = [context](int id) { return context.mLuaManager->llmClient().cancel(id); };
+
+        // Dialogue window integration. GUI changes are queued to run on the main thread.
+        api["setDialogueInput"] = [context](const sol::table& options) {
+            const bool visible = options.get_or("visible", true);
+            const bool enabled = options.get_or("enabled", true);
+            std::string hint = options.get_or<std::string>("hint", {});
+            context.mLuaManager->addAction(
+                [visible, enabled, hint = std::move(hint)] {
+                    MWBase::Environment::get().getWindowManager()->getDialogueWindow()->setTextInput(
+                        visible, enabled, hint);
+                },
+                "setDialogueInputAction");
+        };
+
+        api["addDialogueResponse"] = [context](std::string text, const sol::optional<sol::table>& options) {
+            std::string title;
+            if (options.has_value())
+                title = options->get_or<std::string>("title", {});
+            context.mLuaManager->addAction(
+                [text = std::move(text), title = std::move(title)] {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (windowManager->containsMode(MWGui::GM_Dialogue))
+                        windowManager->getDialogueWindow()->addResponse(title, text);
+                },
+                "addDialogueResponseAction");
+        };
 
         return LuaUtil::makeReadOnly(api);
     }

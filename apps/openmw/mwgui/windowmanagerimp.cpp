@@ -1684,6 +1684,10 @@ namespace MWGui
     {
         return mTradeWindow;
     }
+    MWGui::DialogueWindow* WindowManager::getDialogueWindow()
+    {
+        return mDialogueWindow;
+    }
     MWGui::PostProcessorHud* WindowManager::getPostProcessorHud()
     {
         return mPostProcessorHud;

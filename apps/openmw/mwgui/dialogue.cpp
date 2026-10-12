@@ -1,6 +1,7 @@
 #include "dialogue.hpp"
 
 #include <MyGUI_Button.h>
+#include <MyGUI_EditBox.h>
 #include <MyGUI_LanguageManager.h>
 #include <MyGUI_ProgressBar.h>
 #include <MyGUI_ScrollBar.h>
@@ -16,6 +17,7 @@
 
 #include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/environment.hpp"
+#include "../mwbase/luamanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
@@ -315,6 +317,9 @@ namespace MWGui
     // Morrowind uses 3 px invisible borders for padding topics
     static constexpr int sVerticalPadding = 3;
 
+    // Vertical space taken from the history when the text input is visible
+    static constexpr int sTextInputSpace = 30;
+
     DialogueWindow::DialogueWindow()
         : WindowBase("openmw_dialogue_window.layout")
         , mIsCompanion(false)
@@ -341,6 +346,10 @@ namespace MWGui
         getWidget(mDispositionBar, "Disposition");
         getWidget(mDispositionText, "DispositionText");
         getWidget(mScrollBar, "VScroll");
+        getWidget(mHistoryBox, "HistoryBox");
+        getWidget(mHistoryContainer, "HistoryContainer");
+        getWidget(mTextInput, "TextInput");
+        mTextInput->eventEditSelectAccept += MyGUI::newDelegate(this, &DialogueWindow::onTextInputAccept);
 
         mScrollBar->eventScrollChangePosition += MyGUI::newDelegate(this, &DialogueWindow::onScrollbarMoved);
         mHistory->eventMouseWheel += MyGUI::newDelegate(this, &DialogueWindow::onMouseWheel);
@@ -784,6 +793,48 @@ namespace MWGui
     {
         mHistoryContents.push_back(std::make_unique<Message>(text));
         updateHistory();
+    }
+
+    void DialogueWindow::setTextInput(bool visible, bool enabled, std::string_view hint)
+    {
+        if (mTextInput->getVisible() != visible)
+        {
+            mTextInput->setVisible(visible);
+            const int offset = visible ? -sTextInputSpace : sTextInputSpace;
+            mHistoryBox->setSize(mHistoryBox->getSize() + MyGUI::IntSize(0, offset));
+            mHistoryContainer->setSize(mHistoryContainer->getSize() + MyGUI::IntSize(0, offset));
+            mScrollBar->setSize(mScrollBar->getSize() + MyGUI::IntSize(0, offset));
+            updateHistory();
+        }
+
+        if (enabled)
+        {
+            // Clear the hint shown while disabled, but keep anything the player typed
+            if (!mTextInput->getEnabled())
+                mTextInput->setCaption({});
+            mTextInput->setEnabled(true);
+            if (visible && mMainWidget->getVisible())
+                MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mTextInput);
+        }
+        else
+        {
+            mTextInput->setEnabled(false);
+            mTextInput->setCaption(MyGUI::UString(hint));
+        }
+    }
+
+    void DialogueWindow::onTextInputAccept(MyGUI::EditBox* sender)
+    {
+        if (mPtr.isEmpty() || mGoodbye || !sender->getEnabled()
+            || MWBase::Environment::get().getDialogueManager()->isInChoice())
+            return;
+
+        const std::string text = sender->getOnlyText();
+        if (text.find_first_not_of(" \t") == std::string::npos)
+            return;
+
+        sender->setCaption({});
+        MWBase::Environment::get().getLuaManager()->dialogueTextInput(mPtr, text);
     }
 
     void DialogueWindow::updateDisposition()

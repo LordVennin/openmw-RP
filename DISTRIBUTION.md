@@ -35,8 +35,8 @@ The original phases stay; two new ones slot in after phase 2, replacing the old 
 - [x] Phase 0: build unmodified OpenMW from source
 - [x] Phase 1: `openmw.llm` Lua package with `ping()`
 - [ ] Phase 2: async HTTP binding, tested against a hand-run llama-server
-- [ ] **Phase 2.5 (new):** bundle llama-server in CMake; the game auto-launches it
-- [ ] Phase 3: Lua mod: card loader, prompt builder, chat window
+- [ ] **Phase 2.5 (new):** bundle llama-server in CMake; the game auto-launches it. Expose context settings to users; the same context size drives llama-server's `-c` and the mod's prompt budget.
+- [x] Phase 3: Lua mod: card loader, prompt builder, chat window
 - [ ] **Phase 3.5 (new):** launcher AI tab: GPU detection, model download, settings
 - [ ] Phase 4: game actions, memory, and the lorebook
 

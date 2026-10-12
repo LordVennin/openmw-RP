@@ -185,6 +185,7 @@ namespace MWGui
         MWGui::CountDialog* getCountDialog() override;
         MWGui::ConfirmationDialog* getConfirmationDialog() override;
         MWGui::TradeWindow* getTradeWindow() override;
+        MWGui::DialogueWindow* getDialogueWindow() override;
         MWGui::HUD* getHud() override;
         MWGui::PostProcessorHud* getPostProcessorHud() override;
         std::vector<MWGui::WindowBase*> getGuiModeWindows(GuiMode mode) override;

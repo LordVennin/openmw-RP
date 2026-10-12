@@ -565,6 +565,16 @@ namespace MWLua
         });
     }
 
+    void LuaManager::dialogueTextInput(const MWWorld::Ptr& actor, std::string_view text)
+    {
+        mLua.protectedCall([&](LuaUtil::LuaView& view) {
+            sol::table data = view.newTable();
+            data["actor"] = LObject(actor);
+            data["text"] = text;
+            sendLocalEvent(mPlayer, "DialogueTextInput", data);
+        });
+    }
+
     void LuaManager::applyMagicEffects(ESM::RefId id, const MWWorld::Ptr& caster, ESM::RefNum item,
         const MWWorld::Ptr& target, const std::vector<int>& effects, bool ignoreReflect, bool ignoreSpellAbsorption,
         bool stackable, bool isReflect)

@@ -68,14 +68,32 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [x] Phase 0: get a clean build of unmodified OpenMW running.
 - [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
 - [x] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
-- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it.
-- [ ] Phase 3: write the Lua mod: card loader, prompt builder, chat window.
+- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`).
+- [x] Phase 3: write the Lua mod: card loader, prompt builder, chat window. Built as a text input inside the vanilla dialogue window (see below).
 - [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
 - [ ] Phase 4: add game actions, memory, and the lorebook.
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
 After phase 2, everything else is Lua with hot reloading, which iterates much faster than rebuilding C++.
+
+## Phase 3: AI dialogue in the dialogue window
+
+The player talks to any NPC in their own words from the vanilla dialogue window. The NPC's reply appears in the history like a normal response, with topic links.
+
+**Engine (small C++ changes):**
+- The dialogue window has a hidden single-line text input (`openmw_dialogue_window.layout`, `mwgui/dialogue.cpp`).
+- Pressing Enter sends the `DialogueTextInput` event (`{ actor, text }`) to player scripts.
+- `openmw.llm.setDialogueInput{ visible, enabled, hint }` and `openmw.llm.addDialogueResponse(text, { title })` drive the window from Lua.
+
+**Mod** (built-in: `files/data/scripts/llm/`, registered in `builtin.omwscripts`; settings page "AI Dialogue"):
+- **`player.lua`** ties it together. It keeps a per-NPC history, saved with the game: the last 20 exchanges for each of the 30 most recent NPCs. Vanilla greetings and clicked topics become context. `I.LLMDialogue.lastPrompt()` shows the last prompt sent.
+- **`cards.lua`** loads SillyTavern V2 cards from `llm/cards/<record id>.json`. Every other NPC gets a card built from game data by **`generated.lua`**.
+- **`prompt.lua`** + **`templates.lua`** build the prompt from an instruct template, with SillyTavern's samplers and stop strings.
+- **`scene.lua`** builds the `[Scene]` note: place, time, weather, both characters, nearby people, doors and things. It is capped, in words, and rebuilt for every request.
+- **`knowledge.lua`** builds a lorebook from vanilla dialogue. When a topic is mentioned, the NPC's vanilla answer is added, using the first line whose filters and conditions pass. Lines gated on script variables or death counts are skipped.
+- **`budget.lua`** derives every limit from one context size.
+- **`sanitize.lua`** strips characters the game font can't draw, and leaked special tokens.
 
 ## Dev setup
 
@@ -101,6 +119,8 @@ The endpoint is then `http://localhost:8080/v1/chat/completions`. To use the bas
 - **What helps:** a substantial character card (SillyTavern's working request was about 1300 prompt tokens), and the character's name after the model prefix (`<|turn>model\nFargoth:`). Short prompts without a name prefix still tend to loop.
 - **SillyTavern's samplers:** temperature 0.85 (dynamic range 0.15), top_k 80, top_p 0.95, min_p 0.01, repeat_penalty 1.05 over the last 550 tokens, DRY off.
 - **Quality:** acceptable but rough.
+
+**The Phase 3 mod currently needs the base model.** With the prompts the mod builds, the fine-tune degenerates after a few words, even with greedy decoding. The base model gives good, in-character replies to the same prompts. SillyTavern's requests still work with the fine-tune, so the next step is to capture one of them with a logging proxy and compare it with ours.
 
 **SillyTavern against llama-server:** set DRY's sequence breakers to a non-empty list (for example `["\n", ":", "\"", "*"]`). llama-server rejects an empty list.
 

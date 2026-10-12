@@ -41,3 +41,7 @@ CUSTOM: scripts/omw/console/local.lua
 
 # Music system
 NPC,CREATURE: scripts/omw/music/actor.lua
+
+# AI dialogue (openmw.llm)
+MENU: scripts/llm/settings.lua
+PLAYER: scripts/llm/player.lua

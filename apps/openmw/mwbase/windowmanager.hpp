@@ -159,6 +159,7 @@ namespace MWBase
         virtual MWGui::CountDialog* getCountDialog() = 0;
         virtual MWGui::ConfirmationDialog* getConfirmationDialog() = 0;
         virtual MWGui::TradeWindow* getTradeWindow() = 0;
+        virtual MWGui::DialogueWindow* getDialogueWindow() = 0;
         virtual MWGui::HUD* getHud() = 0;
         virtual MWGui::PostProcessorHud* getPostProcessorHud() = 0;
         virtual std::vector<MWGui::WindowBase*> getGuiModeWindows(MWGui::GuiMode mode) = 0;

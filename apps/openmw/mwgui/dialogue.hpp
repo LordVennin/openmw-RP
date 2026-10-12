@@ -155,6 +155,10 @@ namespace MWGui
 
         void addMessageBox(std::string_view text);
 
+        /// Free text input under the history, used by Lua scripts (openmw.llm). Hidden by default.
+        /// While disabled, the input shows `hint` instead of the typed text.
+        void setTextInput(bool visible, bool enabled, std::string_view hint);
+
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
 
@@ -178,6 +182,8 @@ namespace MWGui
         void onGoodbyeActivated();
 
         void onScrollbarMoved(MyGUI::ScrollBar* sender, size_t pos);
+
+        void onTextInputAccept(MyGUI::EditBox* sender);
 
         void updateHistory(bool scrollbar = false);
 
@@ -212,6 +218,9 @@ namespace MWGui
         MyGUI::ProgressBar* mDispositionBar;
         MyGUI::TextBox* mDispositionText;
         MyGUI::Button* mGoodbyeButton;
+        MyGUI::Widget* mHistoryBox;
+        MyGUI::Widget* mHistoryContainer;
+        MyGUI::EditBox* mTextInput;
 
         PersuasionDialog mPersuasionDialog;
 

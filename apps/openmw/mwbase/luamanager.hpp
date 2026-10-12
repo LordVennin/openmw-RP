@@ -104,6 +104,8 @@ namespace MWBase
         virtual void onDialogueResponse(
             const MWWorld::Ptr& actor, const ESM::DialInfo& info, const ESM::Dialogue& record)
             = 0;
+        // Free text typed by the player in the dialogue window's text input
+        virtual void dialogueTextInput(const MWWorld::Ptr& actor, std::string_view text) = 0;
         virtual void questUpdated(const ESM::RefId& questId, int stage) = 0;
         // `arg` is either forwarded from MWGui::pushGuiMode or empty
         virtual void uiModeChanged(const MWWorld::Ptr& arg) = 0;

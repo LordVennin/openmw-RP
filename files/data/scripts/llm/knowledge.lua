@@ -1,0 +1,215 @@
+-- A lorebook built from the game's own dialogue. When a dialogue topic (such as "ring") is mentioned in the
+-- conversation, the NPC's vanilla answer to that topic is added to the prompt, so the model knows what the NPC
+-- would say if the player clicked the topic. Only mentioned topics are included, within a token budget.
+--
+-- Vanilla picks the first response whose filters and conditions all pass. Lua can evaluate most of them.
+-- Lines gated on things a player script can't read (mwscript variables, death counts) are skipped: they almost
+-- always mark a later quest state, so skipping them falls through to the line the NPC would say now.
+
+local core = require('openmw.core')
+local types = require('openmw.types')
+
+local budget = require('scripts.llm.budget')
+
+local M = {}
+
+local topicIndex = nil
+
+-- All topic names, longest first so "little secret" wins over "secret"
+local function getTopicIndex()
+    if not topicIndex then
+        topicIndex = {}
+        for _, record in pairs(core.dialogue.topic.records) do
+            if record.name and #record.name >= 3 then
+                topicIndex[#topicIndex + 1] = { id = record.id, name = record.name, lower = record.name:lower() }
+            end
+        end
+        table.sort(topicIndex, function(a, b)
+            return #a.lower > #b.lower
+        end)
+    end
+    return topicIndex
+end
+
+local function escapePattern(s)
+    return (s:gsub('[%^%$%(%)%%%.%[%]%*%+%-%?]', '%%%0'))
+end
+
+local function mentions(text, topicLower)
+    return text:find('%f[%w]' .. escapePattern(topicLower) .. '%f[%W]') ~= nil
+end
+
+-- Topics mentioned in any of `texts`, at most `limit`
+function M.findTopics(texts, limit)
+    local haystack = table.concat(texts, '\n'):lower()
+    local found = {}
+    for _, topic in ipairs(getTopicIndex()) do
+        if mentions(haystack, topic.lower) then
+            found[#found + 1] = topic
+            -- Don't also match words inside a longer topic that was already found
+            haystack = haystack:gsub(escapePattern(topic.lower), ' ')
+            if #found >= limit then
+                break
+            end
+        end
+    end
+    return found
+end
+
+local function lower(s)
+    return s and s:lower() or nil
+end
+
+local function compare(op, a, b)
+    local O = core.dialogue.CONDITION_OPERATOR
+    if op == O.Equal then
+        return a == b
+    elseif op == O.NotEqual then
+        return a ~= b
+    elseif op == O.Greater then
+        return a > b
+    elseif op == O.GreaterEqual then
+        return a >= b
+    elseif op == O.Less then
+        return a < b
+    elseif op == O.LessEqual then
+        return a <= b
+    end
+    return true
+end
+
+local function inFaction(actor, factionId)
+    local ok, factions = pcall(types.NPC.getFactions, actor)
+    for _, id in ipairs(ok and factions or {}) do
+        if id:lower() == factionId then
+            return true
+        end
+    end
+    return false
+end
+
+-- Evaluates one condition. Conditions a player script can't read fail; other unhandled ones pass.
+local function conditionPasses(condition, ctx)
+    local T = core.dialogue.CONDITION_TYPE
+    local t = condition.type
+    local id = lower(condition.recordId)
+    local value
+    if t == T.Choice then
+        return false -- answers inside a vanilla choice menu
+    elseif t == T.Local or t == T.NotLocal or t == T.Global or t == T.Dead then
+        return false -- mwscript variables and death counts aren't readable here
+    elseif t == T.Journal then
+        local quest = types.Player.quests(ctx.player)[id]
+        value = quest and quest.stage or 0
+    elseif t == T.Item then
+        value = types.Actor.inventory(ctx.player):countOf(id)
+    elseif t == T.NotId then
+        return ctx.npc.recordId:lower() ~= id
+    elseif t == T.NotFaction then
+        return lower(ctx.npcRecord.primaryFaction) ~= id
+    elseif t == T.NotClass then
+        return lower(ctx.npcRecord.class) ~= id
+    elseif t == T.NotRace then
+        return lower(ctx.npcRecord.race) ~= id
+    elseif t == T.NotCell then
+        local cellName = lower(ctx.player.cell.name) or ''
+        return cellName:sub(1, #(condition.cellName or '')) ~= lower(condition.cellName or '')
+    elseif t == T.PcLevel then
+        value = types.Actor.stats.level(ctx.player).current
+    elseif t == T.PcGender then
+        value = ctx.playerRecord.isMale and 0 or 1
+    elseif t == T.SameRace then
+        value = (lower(ctx.npcRecord.race) == lower(ctx.playerRecord.race)) and 1 or 0
+    elseif t == T.SameGender then
+        value = (ctx.npcRecord.isMale == ctx.playerRecord.isMale) and 1 or 0
+    elseif t == T.PcCrimeLevel then
+        value = types.Player.getCrimeLevel(ctx.player)
+    else
+        return true
+    end
+    return compare(condition.operator, value, condition.value)
+end
+
+local function infoPasses(info, ctx)
+    if info.filterActorId and info.filterActorId:lower() ~= ctx.npc.recordId:lower() then
+        return false
+    end
+    if info.filterActorRace and info.filterActorRace:lower() ~= lower(ctx.npcRecord.race) then
+        return false
+    end
+    if info.filterActorClass and info.filterActorClass:lower() ~= lower(ctx.npcRecord.class) then
+        return false
+    end
+    if info.filterActorGender and (info.filterActorGender == 'male') ~= ctx.npcRecord.isMale then
+        return false
+    end
+    if info.filterActorFaction and info.filterActorFaction ~= '' and not inFaction(ctx.npc, info.filterActorFaction:lower()) then
+        return false
+    end
+    if info.filterPlayerFaction and info.filterPlayerFaction ~= ''
+        and not inFaction(ctx.player, info.filterPlayerFaction:lower()) then
+        return false
+    end
+    if info.filterPlayerCell then
+        local cellName = lower(ctx.player.cell.name) or ''
+        if cellName:sub(1, #info.filterPlayerCell) ~= info.filterPlayerCell:lower() then
+            return false
+        end
+    end
+    if info.filterActorDisposition and ctx.disposition and ctx.disposition < info.filterActorDisposition then
+        return false
+    end
+    for _, condition in ipairs(info.conditions or {}) do
+        local ok, passes = pcall(conditionPasses, condition, ctx)
+        if not ok or not passes then
+            return false
+        end
+    end
+    return true
+end
+
+-- The first response to `topicId` that this NPC would give, or nil
+function M.responseFor(topicId, ctx)
+    local record = core.dialogue.topic.records[topicId]
+    if not record then
+        return nil
+    end
+    for _, info in ipairs(record.infos) do
+        if info.text and info.text ~= '' and infoPasses(info, ctx) then
+            return info.text
+        end
+    end
+    return nil
+end
+
+-- @param npc, player game objects
+-- @param texts list of strings to look for topic names in (the player's line, the NPC's last line)
+-- @param expand function(text) -> text expanding vanilla macros (%PCName...)
+-- @param limits table from budget.fromContextSize
+-- @return the "[Knowledge]" note, or nil
+function M.build(npc, player, texts, expand, limits)
+    local ctx = {
+        npc = npc,
+        player = player,
+        npcRecord = types.NPC.record(npc),
+        playerRecord = types.NPC.record(player),
+    }
+    local ok, disposition = pcall(types.NPC.getDisposition, npc, player)
+    ctx.disposition = ok and disposition or nil
+
+    local lines = {}
+    local perTopic = math.floor(limits.knowledgeTokens / math.max(1, limits.maxTopics))
+    for _, topic in ipairs(M.findTopics(texts, limits.maxTopics)) do
+        local found, text = pcall(M.responseFor, topic.id, ctx)
+        if found and text then
+            text = budget.truncate((expand(text):gsub('%s+', ' ')), perTopic)
+            lines[#lines + 1] = string.format('- About "%s", %s would say: %s', topic.name, ctx.npcRecord.name, text)
+        end
+    end
+    if #lines == 0 then
+        return nil
+    end
+    return '[What ' .. ctx.npcRecord.name .. ' knows]\n' .. table.concat(lines, '\n')
+end
+
+return M

@@ -1,0 +1,46 @@
+pageName: "AI Dialogue"
+pageDescription: "Free-text conversations with NPCs in the dialogue window, using a local LLM server."
+
+generalGroup: "General"
+
+enabled: "Enable AI Dialogue"
+enabledDescription: "Shows a text box in the dialogue window for talking to NPCs in your own words."
+
+replyTokens: "Maximum Reply Length"
+replyTokensDescription: |
+    Longest reply the NPC can give, in tokens (roughly three quarters of a word each).
+    (default: 170)
+
+temperature: "Temperature"
+temperatureDescription: |
+    Higher values give more varied, less predictable replies.
+    (default: 0.85)
+
+advancedGroup: "Advanced"
+
+contextSize: "Context Size"
+contextSizeDescription: |
+    Must match the context size the LLM server was started with (llama-server -c).
+    Every prompt limit (card, scene and history size) is derived from it.
+    (default: 8192)
+
+sceneDetail: "Scene Detail"
+sceneDetailDescription: |
+    How much the NPC is told about the surroundings.
+      Off: nothing.
+      Brief: the place, the time and the two of you.
+      Full: also nearby people, doors and things in view.
+off: "Off"
+brief: "Brief"
+full: "Full"
+
+scenePosition: "Scene Note Position"
+scenePositionDescription: |
+    Where the scene description goes in the prompt.
+      System: with the character description at the start.
+      Before Last Message: right before your latest line, which small models may follow more closely.
+system: "System"
+beforeLastMessage: "Before Last Message"
+
+thinking: "{name} is thinking..."
+serverError: "(The AI server could not be reached: {error})"
