@@ -18,6 +18,30 @@ local templates = {
         -- Special tokens that must never reach the dialogue window if the model leaks them.
         specialTokens = { '<turn|>', '<|turn>', '<|channel>', '<channel|>', '<|think|>', '<bos>', '<eos>' },
     },
+    -- Pygmalion's Metharme format, recommended for many Mistral Nemo role-play fine-tunes (e.g. Rocinante).
+    -- Turns have no closing token; the next turn's prefix ends the previous one.
+    metharme = {
+        systemPrefix = '<|system|>',
+        systemSuffix = '',
+        userPrefix = '<|user|>',
+        userSuffix = '',
+        modelPrefix = '<|model|>',
+        modelSuffix = '',
+        stop = { '<|user|>', '<|model|>', '<|system|>', '</s>' },
+        specialTokens = { '<|user|>', '<|model|>', '<|system|>', '</s>', '<s>' },
+    },
+    -- Mistral v3 "Tekken" (Mistral Nemo), without whitespace and without [SYSTEM_PROMPT]: the system text goes
+    -- first as plain text, player lines are wrapped in [INST]...[/INST] and model replies end with </s>.
+    mistralTekken = {
+        systemPrefix = '',
+        systemSuffix = '',
+        userPrefix = '[INST]',
+        userSuffix = '[/INST]',
+        modelPrefix = '',
+        modelSuffix = '</s>',
+        stop = { '</s>', '[INST]', '[/INST]' },
+        specialTokens = { '</s>', '<s>', '[INST]', '[/INST]', '[SYSTEM_PROMPT]', '[/SYSTEM_PROMPT]' },
+    },
 }
 
 -- Sampler values that work well with the roleplay fine-tune (taken from a working SillyTavern setup).

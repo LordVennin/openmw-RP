@@ -99,29 +99,35 @@ The player talks to any NPC in their own words from the vanilla dialogue window.
 
 llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs on an RTX 4090 (24 GB).
 
-**Models** (both Q6_K, 9.8 GB each, in `~/llm/models/`):
+**Models** (in `~/llm/models/`):
 
-- `gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf` from [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-it-roleplay-sft-epoch2-bf16-GGUF). **Default for development.**
-- `gemma-4-12b-it-Q6_K.gguf` from [unsloth](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF), the base Gemma 4 model.
+| File | Source | Template | Notes |
+|---|---|---|---|
+| `Gemma4-12B-RP.i1-Q6_K.gguf` (9.8 GB) | [mradermacher](https://huggingface.co/mradermacher/Gemma4-12B-RP-i1-GGUF) | Gemma 4 | **Default for development.** |
+| `gemma-4-12b-marvin-gutenberg-rp-v2.Q6_K.gguf` (9.8 GB) | [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-marvin-gutenberg-rp-v2-GGUF) | Gemma 4 | Good alternative. |
+| `TheDrummer_Rocinante-XL-16B-v1-Q5_K_M.gguf` (11.7 GB) | [bartowski](https://huggingface.co/bartowski/TheDrummer_Rocinante-XL-16B-v1-GGUF) | Metharme or Mistral Tekken | Mistral Nemo based; richest prose. |
+| `gemma-4-12b-it-Q6_K.gguf` (9.8 GB) | [unsloth](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF) | Gemma 4 | Base model. |
+| `gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf` (9.8 GB) | [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-it-roleplay-sft-epoch2-bf16-GGUF) | Gemma 4 | **Broken on this llama.cpp build:** gibberish even through SillyTavern, though it works in oobabooga. Don't use. |
 
 **Launch command:**
 
 ```
-~/llm/llama.cpp/build/bin/llama-server -m ~/llm/models/gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf -ngl 99 -c 8192 --jinja --port 8080
+~/llm/llama.cpp/build/bin/llama-server -m ~/llm/models/Gemma4-12B-RP.i1-Q6_K.gguf -ngl 99 -c 8192 --jinja --port 8080
 ```
 
-The endpoint is then `http://localhost:8080/v1/chat/completions`. To use the base model, swap the `-m` path.
+The mod uses the text-completion endpoint `http://localhost:8080/completion`. Set **AI Dialogue → Advanced → Instruct Template** to match the model: Gemma 4 for the Gemma models; Metharme or Mistral Tekken for Rocinante.
 
-**Base model needs thinking turned off.** Gemma 4 thinks by default. Unless a request includes `"chat_template_kwargs": {"enable_thinking": false}`, it can spend the whole token budget reasoning and return an empty `content`. The roleplay fine-tune does not need this.
+**Model comparison** (Oct 12, 2026). Every model got the same prompt built by the mod: Fargoth's card, the scene and knowledge notes, the vanilla greeting, two turns of the ring conversation, then "what can you offer me for this ring?". Each model ran five fixed seeds with the mod's samplers.
+- **Gemma4-12B-RP:** 5/5 clean; the most grounded in the card (Sellus Gravius, Elone, Arrille's tradehouse, glances at the lighthouse); concise; always stops on its own.
+- **marvin-gutenberg-rp-v2:** 5/5 clean, very in character.
+- **Rocinante XL 16B:** 5/5 clean in both formats; the richest prose. It makes factual slips (Arrille as a woman and a "fence", "gold crowns") and writes long, so 4/5 replies hit the 170-token limit. It would want a higher reply length, and Phase 4's lorebook.
+- **Base Gemma 4:** 5/5 clean but generic.
+- **The first roleplay fine-tune:** 0/5, gibberish. That upload is the problem, not Gemma 4 fine-tunes in general.
 
-**The roleplay fine-tune needs text completion.**
-- **Chat endpoint:** through `/v1/chat/completions` it degenerates into repetition, even for "Say hi". The cause isn't its embedded template (which renders the same prompt as the base model's), the GPU, the KV cache type or the file. SillyTavern drives the same file on the same llama-server well using text completion.
-- **What helps:** a substantial character card (SillyTavern's working request was about 1300 prompt tokens), and the character's name after the model prefix (`<|turn>model\nFargoth:`). Short prompts without a name prefix still tend to loop.
-- **SillyTavern's samplers:** temperature 0.85 (dynamic range 0.15), top_k 80, top_p 0.95, min_p 0.01, repeat_penalty 1.05 over the last 550 tokens, DRY off.
-- **Quality:** acceptable but rough.
+**Gemma 4 needs an empty thought block before each reply** (`<|channel>thought\n<channel|>`, the `replyPrefix` in `scripts/llm/templates.lua`). Without it, replies are full of misspellings and nonsense words.
 
-**The Phase 3 mod currently needs the base model.** With the prompts the mod builds, the fine-tune degenerates after a few words, even with greedy decoding. The base model gives good, in-character replies to the same prompts. SillyTavern's requests still work with the fine-tune, so the next step is to capture one of them with a logging proxy and compare it with ours.
+**Base model on the chat endpoint:** Gemma 4 thinks by default. Unless a `/v1/chat/completions` request includes `"chat_template_kwargs": {"enable_thinking": false}`, it can spend the whole token budget reasoning and return an empty `content`.
 
 **SillyTavern against llama-server:** set DRY's sequence breakers to a non-empty list (for example `["\n", ":", "\"", "*"]`). llama-server rejects an empty list.
 
-**VRAM:** with either model loaded and an 8K context, the GPU used 13.4 GB of 24 GB in total, including about 2 GB already used by the desktop. That leaves about 10 GB for Morrowind.
+**VRAM:** with a 9.8 GB model and an 8K context, the GPU used about 13.4 GB of 24 GB in total, including about 2 GB already used by the desktop. That leaves about 10 GB for Morrowind. Rocinante Q5_K_M uses about 2 GB more.

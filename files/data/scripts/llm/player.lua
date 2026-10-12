@@ -46,7 +46,8 @@ local function isEnabled()
 end
 
 local function template()
-    return templates.templates[templates.default]
+    return templates.templates[advancedSettings:get('template') or templates.default]
+        or templates.templates[templates.default]
 end
 
 local function playerName()

@@ -58,6 +58,14 @@ I.Settings.registerGroup({
             argument = { integer = true, min = 2048, max = 131072 },
         },
         {
+            key = 'template',
+            renderer = 'select',
+            name = 'template',
+            description = 'templateDescription',
+            default = 'gemma4',
+            argument = { l10n = 'LLMDialogue', items = { 'gemma4', 'metharme', 'mistralTekken' } },
+        },
+        {
             key = 'sceneDetail',
             renderer = 'select',
             name = 'sceneDetail',
