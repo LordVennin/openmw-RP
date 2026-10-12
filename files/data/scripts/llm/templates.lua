@@ -10,6 +10,9 @@ local templates = {
         userSuffix = '<turn|>\n',
         modelPrefix = '<|turn>model\n',
         modelSuffix = '<turn|>\n',
+        -- Gemma 4 always sees a thought block before an answer; with thinking off it is empty. Leaving it out
+        -- puts the reply off-distribution and causes misspellings and nonsense words.
+        replyPrefix = '<|channel>thought\n<channel|>',
         -- '<|channel>' starts a thinking block, which would continue past the reply
         stop = { '<turn|>', '<|turn>', '<|channel>' },
         -- Special tokens that must never reach the dialogue window if the model leaks them.

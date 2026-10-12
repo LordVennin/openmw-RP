@@ -93,7 +93,7 @@ function M.build(args)
     if card.postHistoryInstructions then
         userLine = userLine .. '\n\n' .. card.postHistoryInstructions
     end
-    tail = tail .. userTurn(template, userLine) .. template.modelPrefix .. args.npcName .. ':'
+    tail = tail .. userTurn(template, userLine) .. template.modelPrefix .. (template.replyPrefix or '') .. args.npcName .. ':'
 
     local turns = {}
     for i, entry in ipairs(args.history or {}) do
