@@ -44,3 +44,6 @@ beforeLastMessage: "Before Last Message"
 
 thinking: "{name} is thinking..."
 serverError: "(The AI server could not be reached: {error})"
+recall: "Recall"
+earlierConversation: "Earlier conversation"
+nowHeading: "Now"

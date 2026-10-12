@@ -35,6 +35,10 @@ local histories = {}
 local dialogueNpc = nil
 -- The request waiting for a reply: { id, npc, npcName, userText }, or nil
 local pending = nil
+-- Whether the earlier conversation was already replayed into the open dialogue window
+local recalled = false
+-- Number of history turns that existed when the dialogue window opened (the "earlier conversation")
+local earlierTurns = 0
 local lastPrompt = nil
 
 local function isEnabled()
@@ -99,8 +103,37 @@ local function responseInfo(e)
     return nil
 end
 
+local function canRecall()
+    return not recalled and earlierTurns > 0
+end
+
 local function setInput(enabled, hint)
-    llm.setDialogueInput({ visible = isEnabled(), enabled = enabled, hint = hint or '' })
+    llm.setDialogueInput({
+        visible = isEnabled(),
+        enabled = enabled,
+        hint = hint or '',
+        recallLabel = canRecall() and l10n('recall') or '',
+    })
+end
+
+-- Replays the saved conversation with the NPC into the dialogue window, styled like live chat
+local function recallConversation(npc)
+    local history = histories[npc.id]
+    if recalled or not history or earlierTurns == 0 then
+        return
+    end
+    recalled = true
+    llm.addDialogueResponse('', { title = l10n('earlierConversation') })
+    for i = 1, math.min(earlierTurns, #history.turns) do
+        local turn = history.turns[i]
+        if turn.role == 'user' then
+            llm.addDialogueResponse('', { title = turn.topic or turn.text })
+        else
+            llm.addDialogueResponse(turn.text)
+        end
+    end
+    llm.addDialogueResponse('', { title = l10n('nowHeading') })
+    setInput(pending == nil, pending and l10n('thinking', { name = pending.npcName }) or nil)
 end
 
 local function cancelPending()
@@ -222,11 +255,19 @@ end
 
 local function onUiModeChanged(data)
     if data.newMode == 'Dialogue' then
+        local freshWindow = data.oldMode == nil
         if data.arg and types.NPC.objectIsInstance(data.arg) then
             if dialogueNpc ~= data.arg then
                 cancelPending()
+                freshWindow = true
             end
             dialogueNpc = data.arg
+        end
+        if freshWindow and dialogueNpc then
+            -- A fresh dialogue window starts with an empty history; everything saved so far can be recalled
+            recalled = false
+            local history = histories[dialogueNpc.id]
+            earlierTurns = history and #history.turns or 0
         end
         if dialogueNpc then
             if pending then
@@ -258,7 +299,7 @@ local function onDialogueResponse(e)
         history.greeting = text
     elseif e.type == 'topic' then
         -- Vanilla topic answers become context, as if the player had asked about the topic
-        table.insert(history.turns, { role = 'user', text = 'Tell me about ' .. record.name .. '.' })
+        table.insert(history.turns, { role = 'user', text = 'Tell me about ' .. record.name .. '.', topic = record.name })
         table.insert(history.turns, { role = 'model', text = text })
     end
 end
@@ -281,7 +322,8 @@ local function onSave()
             first = first + 1
         end
         for j = first, #history.turns do
-            turns[#turns + 1] = { role = history.turns[j].role, text = history.turns[j].text }
+            local turn = history.turns[j]
+            turns[#turns + 1] = { role = turn.role, text = turn.text, topic = turn.topic }
         end
         saved[ids[i]] = { greeting = history.greeting, turns = turns, lastUsed = history.lastUsed }
     end
@@ -315,6 +357,11 @@ return {
     eventHandlers = {
         UiModeChanged = onUiModeChanged,
         DialogueResponse = onDialogueResponse,
+        DialogueAction = function(e)
+            if isEnabled() and e.action == 'recall' and types.NPC.objectIsInstance(e.actor) then
+                recallConversation(e.actor)
+            end
+        end,
         DialogueTextInput = function(e)
             if isEnabled() and not pending and types.NPC.objectIsInstance(e.actor) then
                 sendLine(e.actor, e.text)

@@ -68,10 +68,11 @@ namespace MWLua
             const bool visible = options.get_or("visible", true);
             const bool enabled = options.get_or("enabled", true);
             std::string hint = options.get_or<std::string>("hint", {});
+            std::string recallLabel = options.get_or<std::string>("recallLabel", {});
             context.mLuaManager->addAction(
-                [visible, enabled, hint = std::move(hint)] {
+                [visible, enabled, hint = std::move(hint), recallLabel = std::move(recallLabel)] {
                     MWBase::Environment::get().getWindowManager()->getDialogueWindow()->setTextInput(
-                        visible, enabled, hint);
+                        visible, enabled, hint, recallLabel);
                 },
                 "setDialogueInputAction");
         };

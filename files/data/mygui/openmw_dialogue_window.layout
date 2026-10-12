@@ -19,6 +19,9 @@
         <Widget type="EditBox" skin="MW_TextEdit" position="8 365 381 24" align="HStretch Bottom" name="TextInput">
             <Property key="Visible" value="false"/>
         </Widget>
+        <Widget type="Button" skin="MW_Button" position="312 365 77 24" align="Right Bottom" name="RecallButton">
+            <Property key="Visible" value="false"/>
+        </Widget>
 
         <!-- The disposition bar-->
         <Widget type="ProgressBar" skin="MW_Progress_Blue" position="398 8 166 18"

@@ -125,6 +125,7 @@ namespace MWLua
         void viewportResized(int width, int height) override;
         void actorDied(const MWWorld::Ptr& actor) override;
         void dialogueTextInput(const MWWorld::Ptr& actor, std::string_view text) override;
+        void dialogueAction(const MWWorld::Ptr& actor, std::string_view action) override;
         void onDialogueResponse(
             const MWWorld::Ptr& actor, const ESM::DialInfo& info, const ESM::Dialogue& record) override;
         void applyMagicEffects(ESM::RefId id, const MWWorld::Ptr& caster, ESM::RefNum item, const MWWorld::Ptr& target,

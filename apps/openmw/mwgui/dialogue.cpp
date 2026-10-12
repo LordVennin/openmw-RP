@@ -350,6 +350,8 @@ namespace MWGui
         getWidget(mHistoryContainer, "HistoryContainer");
         getWidget(mTextInput, "TextInput");
         mTextInput->eventEditSelectAccept += MyGUI::newDelegate(this, &DialogueWindow::onTextInputAccept);
+        getWidget(mRecallButton, "RecallButton");
+        mRecallButton->eventMouseButtonClick += MyGUI::newDelegate(this, &DialogueWindow::onRecallClicked);
 
         mScrollBar->eventScrollChangePosition += MyGUI::newDelegate(this, &DialogueWindow::onScrollbarMoved);
         mHistory->eventMouseWheel += MyGUI::newDelegate(this, &DialogueWindow::onMouseWheel);
@@ -795,8 +797,18 @@ namespace MWGui
         updateHistory();
     }
 
-    void DialogueWindow::setTextInput(bool visible, bool enabled, std::string_view hint)
+    void DialogueWindow::setTextInput(bool visible, bool enabled, std::string_view hint, std::string_view recallLabel)
     {
+        const bool showRecall = visible && !recallLabel.empty();
+        if (mRecallButton->getVisible() != showRecall)
+        {
+            mRecallButton->setVisible(showRecall);
+            const int width = mRecallButton->getWidth() + 4;
+            mTextInput->setSize(mTextInput->getSize() + MyGUI::IntSize(showRecall ? -width : width, 0));
+        }
+        if (showRecall)
+            mRecallButton->setCaption(MyGUI::UString(recallLabel));
+
         if (mTextInput->getVisible() != visible)
         {
             mTextInput->setVisible(visible);
@@ -835,6 +847,13 @@ namespace MWGui
 
         sender->setCaption({});
         MWBase::Environment::get().getLuaManager()->dialogueTextInput(mPtr, text);
+    }
+
+    void DialogueWindow::onRecallClicked(MyGUI::Widget* /*sender*/)
+    {
+        if (mPtr.isEmpty() || mGoodbye)
+            return;
+        MWBase::Environment::get().getLuaManager()->dialogueAction(mPtr, "recall");
     }
 
     void DialogueWindow::updateDisposition()
