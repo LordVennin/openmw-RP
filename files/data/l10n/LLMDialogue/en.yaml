@@ -57,3 +57,6 @@ templateDescription: |
 gemma4: "Gemma 4"
 metharme: "Metharme"
 mistralTekken: "Mistral Tekken"
+
+itemRemoved: "{item} has been removed from your inventory."
+itemAdded: "{item} has been added to your inventory."

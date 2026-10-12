@@ -45,3 +45,4 @@ NPC,CREATURE: scripts/omw/music/actor.lua
 # AI dialogue (openmw.llm)
 MENU: scripts/llm/settings.lua
 PLAYER: scripts/llm/player.lua
+GLOBAL: scripts/llm/global.lua

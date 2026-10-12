@@ -10,9 +10,11 @@ local storage = require('openmw.storage')
 local types = require('openmw.types')
 local ui = require('openmw.ui')
 
+local actions = require('scripts.llm.actions')
 local budget = require('scripts.llm.budget')
 local cards = require('scripts.llm.cards')
 local generated = require('scripts.llm.generated')
+local handover = require('scripts.llm.handover')
 local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
 local prompt = require('scripts.llm.prompt')
@@ -28,13 +30,18 @@ local SAVE_VERSION = 1
 local MAX_SAVED_NPCS = 30
 local MAX_SAVED_TURNS = 20
 local REQUEST_TIMEOUT = 120
+local ACTION_TIMEOUT = 60
+local MAX_SAVED_EVENTS = 5
 
--- npc id -> { greeting = string, turns = list of { role, text }, lastUsed = game time }
+-- npc id -> { greeting = string, turns = list of { role, text }, events = list of strings, lastUsed = game time }
 local histories = {}
 -- The NPC whose dialogue window is open, or nil
 local dialogueNpc = nil
--- The request waiting for a reply: { id, npc, npcName, userText }, or nil
+-- The turn in progress: { id, stage = 'reply'|'action'|'transfer', npc, npcName, userText, limits }, or nil.
+-- The text input stays disabled until the whole turn (reply, then an optional item exchange) is finished.
 local pending = nil
+-- npc id -> the NPC's mwscript variables (lower-case names), as last reported by the global script
+local localsByNpc = {}
 -- Whether the earlier conversation was already replayed into the open dialogue window
 local recalled = false
 -- Number of history turns that existed when the dialogue window opened (the "earlier conversation")
@@ -57,11 +64,32 @@ end
 local function historyFor(npc)
     local history = histories[npc.id]
     if not history then
-        history = { turns = {} }
+        history = { turns = {}, events = {} }
         histories[npc.id] = history
     end
+    history.events = history.events or {}
     history.lastUsed = core.getGameTime()
     return history
+end
+
+-- Everything an actor carries, grouped by record id: list of { id, name, count }
+local function inventoryItems(actor)
+    local items, byId = {}, {}
+    for _, item in ipairs(types.Actor.inventory(actor):getAll()) do
+        local entry = byId[item.recordId]
+        if not entry then
+            local ok, record = pcall(item.type.record, item)
+            entry = { id = item.recordId, name = ok and record and record.name or item.recordId, count = 0 }
+            byId[item.recordId] = entry
+            items[#items + 1] = entry
+        end
+        entry.count = entry.count + item.count
+    end
+    return items
+end
+
+local function requestLocals(npc)
+    core.sendGlobalEvent('LLMGetLocals', { player = self.object, npc = npc })
 end
 
 -- Expands vanilla dialogue macros (%PCName, %Name, ...) and strips hyperlink markers.
@@ -139,17 +167,130 @@ end
 
 local function cancelPending()
     if pending then
-        llm.cancel(pending.id)
+        if pending.stage ~= 'transfer' then
+            llm.cancel(pending.id)
+        end
         pending = nil
     end
 end
 
-local function onReply(request, response)
-    if not pending or pending.id ~= request.id then
+-- Ends the turn in progress and gives the text input back to the player
+local function finishTurn()
+    pending = nil
+    if dialogueNpc then
+        setInput(true)
+    end
+end
+
+local function onActionReply(request, response)
+    if not pending or pending.id ~= request.id or pending.stage ~= 'action' then
         return
     end
-    pending = nil
+    local transfer = nil
+    if response.ok then
+        local ok, data = pcall(json.decode, response.body)
+        local okAnswer, answer = false, nil
+        if ok and type(data) == 'table' and type(data.content) == 'string' then
+            okAnswer, answer = pcall(json.decode, data.content)
+        end
+        transfer = okAnswer and actions.parse(answer, request.candidates) or nil
+    else
+        print('LLM action check failed: ' .. tostring(response.error or response.status))
+    end
+    if not transfer then
+        finishTurn()
+        return
+    end
 
+    local effects = nil
+    if transfer.transfer == 'player_to_npc' then
+        local ok, found = pcall(handover.find, request.npc, self.object, transfer.item, localsByNpc[request.npc.id])
+        effects = ok and found or nil
+        if not ok then
+            print('LLM handover lookup: ' .. tostring(found))
+        end
+    end
+    pending.stage = 'transfer'
+    pending.transfer = transfer
+    pending.effects = effects
+    core.sendGlobalEvent('LLMApplyTransfer', {
+        player = self.object,
+        npc = request.npc,
+        transfer = transfer.transfer,
+        item = transfer.item,
+        count = transfer.count,
+        effects = effects,
+    })
+end
+
+-- After a reply: if an item could have changed hands, ask the model to classify the exchange.
+-- @return true if a check was started (the turn continues), false if the turn is over
+local function startActionCheck(request, reply)
+    local candidates = actions.findCandidates({ request.userText, reply }, inventoryItems(self.object),
+        inventoryItems(request.npc), request.limits.actionCandidates)
+    if #candidates == 0 then
+        return false
+    end
+    local userName = playerName()
+    local exchange = {
+        { speaker = userName, text = request.userText },
+        { speaker = request.npcName, text = reply },
+    }
+    local body = {
+        prompt = actions.prompt(template(), request.npcName, userName, exchange, candidates),
+        n_predict = 64,
+        temperature = 0,
+        json_schema = actions.schema(candidates),
+        stop = template().stop,
+    }
+    local action = { npc = request.npc, candidates = candidates }
+    local id = llm.request(json.encode(body), async:callback(function(response)
+        onActionReply(action, response)
+    end), { endpoint = 'completion', timeout = ACTION_TIMEOUT })
+    if not id then
+        return false
+    end
+    action.id = id
+    pending.id = id
+    pending.stage = 'action'
+    return true
+end
+
+local function onTransferApplied(result)
+    if not pending or pending.stage ~= 'transfer' then
+        return
+    end
+    local npc = pending.npc
+    if result.ok then
+        local item = result.count > 1 and (result.count .. ' ' .. result.name) or result.name
+        local notice = result.transfer == 'player_to_npc' and 'itemRemoved' or 'itemAdded'
+        ui.showMessage(l10n(notice, { item = item }), { showInDialogue = true })
+        -- No journal notice here: the engine shows "Your journal has been updated" itself when an entry is added
+        local history = historyFor(npc)
+        local event
+        if result.transfer == 'player_to_npc' then
+            event = string.format('The stranger gave %s %s.', pending.npcName, item)
+        else
+            event = string.format('%s gave the stranger %s.', pending.npcName, item)
+        end
+        if pending.effects and pending.effects.note then
+            event = pending.effects.note
+        elseif result.applied and result.applied.journal then
+            event = event .. ' This settled a matter between them.'
+        end
+        table.insert(history.events, event)
+    else
+        print('LLM transfer failed: ' .. tostring(result.error))
+    end
+    finishTurn()
+end
+
+local function onReply(request, response)
+    if not pending or pending.id ~= request.id or pending.stage ~= 'reply' then
+        return
+    end
+
+    local continues = false
     if not response.ok then
         local errorText = response.error or ('HTTP ' .. tostring(response.status))
         ui.showMessage(l10n('serverError', { error = errorText }), { showInDialogue = true })
@@ -170,10 +311,15 @@ local function onReply(request, response)
         table.insert(history.turns, { role = 'user', text = request.userText })
         table.insert(history.turns, { role = 'model', text = reply })
         llm.addDialogueResponse(reply)
+        local ok, started = pcall(startActionCheck, request, reply)
+        continues = ok and started
+        if not ok then
+            print('LLM action check: ' .. tostring(started))
+        end
     end
 
-    if dialogueNpc then
-        setInput(true)
+    if not continues then
+        finishTurn()
     end
 end
 
@@ -212,11 +358,19 @@ local function sendLine(npc, rawText)
     end
     local ok, knowledgeNote = pcall(knowledge.build, npc, self.object, { userText, lastNpcLine }, function(text)
         return sanitize.toDrawable(expandVanillaText(text, npc))
-    end, limits)
+    end, limits, localsByNpc[npc.id])
     if ok and knowledgeNote then
         notes[#notes + 1] = knowledgeNote
     elseif not ok then
         print('LLM knowledge: ' .. tostring(knowledgeNote))
+    end
+    -- Things that happened in this conversation, such as items changing hands
+    if #history.events > 0 then
+        local events = {}
+        for i = math.max(1, #history.events - limits.recentEvents + 1), #history.events do
+            events[#events + 1] = '- ' .. history.events[i]
+        end
+        notes[#notes + 1] = '[Recent events]\n' .. table.concat(events, '\n')
     end
 
     local text, stop = prompt.build({
@@ -238,7 +392,7 @@ local function sendLine(npc, rawText)
     end
     body.temperature = generalSettings:get('temperature') or body.temperature
 
-    local request = { npc = npc, npcName = npcName, userText = userText }
+    local request = { npc = npc, npcName = npcName, userText = userText, limits = limits, stage = 'reply' }
     local id, err = llm.request(json.encode(body), async:callback(function(response)
         onReply(request, response)
     end), { endpoint = 'completion', timeout = REQUEST_TIMEOUT })
@@ -269,6 +423,7 @@ local function onUiModeChanged(data)
             recalled = false
             local history = histories[dialogueNpc.id]
             earlierTurns = history and #history.turns or 0
+            requestLocals(dialogueNpc)
         end
         if dialogueNpc then
             if pending then
@@ -326,7 +481,12 @@ local function onSave()
             local turn = history.turns[j]
             turns[#turns + 1] = { role = turn.role, text = turn.text, topic = turn.topic }
         end
-        saved[ids[i]] = { greeting = history.greeting, turns = turns, lastUsed = history.lastUsed }
+        local events = {}
+        local allEvents = history.events or {}
+        for j = math.max(1, #allEvents - MAX_SAVED_EVENTS + 1), #allEvents do
+            events[#events + 1] = allEvents[j]
+        end
+        saved[ids[i]] = { greeting = history.greeting, turns = turns, events = events, lastUsed = history.lastUsed }
     end
     return { version = SAVE_VERSION, histories = saved }
 end
@@ -361,6 +521,12 @@ return {
         DialogueAction = function(e)
             if isEnabled() and e.action == 'recall' and types.NPC.objectIsInstance(e.actor) then
                 recallConversation(e.actor)
+            end
+        end,
+        LLMTransferApplied = onTransferApplied,
+        LLMLocals = function(data)
+            if data.npc then
+                localsByNpc[data.npc.id] = data.vars
             end
         end,
         DialogueTextInput = function(e)

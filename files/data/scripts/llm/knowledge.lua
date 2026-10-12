@@ -3,8 +3,10 @@
 -- would say if the player clicked the topic. Only mentioned topics are included, within a token budget.
 --
 -- Vanilla picks the first response whose filters and conditions all pass. Lua can evaluate most of them.
--- Lines gated on things a player script can't read (mwscript variables, death counts) are skipped: they almost
--- always mark a later quest state, so skipping them falls through to the line the NPC would say now.
+-- The speaker's mwscript variables come from a snapshot taken by the global script (scripts/llm/global.lua).
+-- Lines gated on things a player script can't read (global variables, death counts, or local variables when no
+-- snapshot is available) are skipped: they almost always mark a later quest state, so skipping them falls
+-- through to the line the NPC would say now.
 
 local core = require('openmw.core')
 local types = require('openmw.types')
@@ -95,9 +97,22 @@ local function conditionPasses(condition, ctx)
     local id = lower(condition.recordId)
     local value
     if t == T.Choice then
-        return false -- answers inside a vanilla choice menu
-    elseif t == T.Local or t == T.NotLocal or t == T.Global or t == T.Dead then
-        return false -- mwscript variables and death counts aren't readable here
+        return ctx.ignoreChoice == true -- answers inside a vanilla choice menu
+    elseif t == T.Local or t == T.NotLocal then
+        local locals = ctx.locals
+        if not locals then
+            return false
+        end
+        local current = locals[lower(condition.variableName)]
+        if t == T.NotLocal then
+            return current == nil -- the speaker's script doesn't declare this variable
+        end
+        if current == nil then
+            return false
+        end
+        value = current
+    elseif t == T.Global or t == T.Dead then
+        return false -- global variables and death counts aren't readable here
     elseif t == T.Journal then
         local quest = types.Player.quests(ctx.player)[id]
         value = quest and quest.stage or 0
@@ -130,7 +145,7 @@ local function conditionPasses(condition, ctx)
     return compare(condition.operator, value, condition.value)
 end
 
-local function infoPasses(info, ctx)
+function M.infoPasses(info, ctx)
     if info.filterActorId and info.filterActorId:lower() ~= ctx.npc.recordId:lower() then
         return false
     end
@@ -175,27 +190,38 @@ function M.responseFor(topicId, ctx)
         return nil
     end
     for _, info in ipairs(record.infos) do
-        if info.text and info.text ~= '' and infoPasses(info, ctx) then
+        if info.text and info.text ~= '' and M.infoPasses(info, ctx) then
             return info.text
         end
     end
     return nil
 end
 
--- @param npc, player game objects
--- @param texts list of strings to look for topic names in (the player's line, the NPC's last line)
--- @param expand function(text) -> text expanding vanilla macros (%PCName...)
--- @param limits table from budget.fromContextSize
--- @return the "[Knowledge]" note, or nil
-function M.build(npc, player, texts, expand, limits)
+-- Everything the filters need to know about the speaker and the player.
+-- @param locals the speaker's mwscript variables (lower-case names), or nil if unknown
+-- @param ignoreChoice true to let lines behind a vanilla choice pass
+function M.newContext(npc, player, locals, ignoreChoice)
     local ctx = {
         npc = npc,
         player = player,
         npcRecord = types.NPC.record(npc),
         playerRecord = types.NPC.record(player),
+        locals = locals,
+        ignoreChoice = ignoreChoice,
     }
     local ok, disposition = pcall(types.NPC.getDisposition, npc, player)
     ctx.disposition = ok and disposition or nil
+    return ctx
+end
+
+-- @param npc, player game objects
+-- @param texts list of strings to look for topic names in (the player's line, the NPC's last line)
+-- @param expand function(text) -> text expanding vanilla macros (%PCName...)
+-- @param limits table from budget.fromContextSize
+-- @param locals the speaker's mwscript variables, or nil
+-- @return the "[Knowledge]" note, or nil
+function M.build(npc, player, texts, expand, limits, locals)
+    local ctx = M.newContext(npc, player, locals, false)
 
     local lines = {}
     local perTopic = math.floor(limits.knowledgeTokens / math.max(1, limits.maxTopics))
