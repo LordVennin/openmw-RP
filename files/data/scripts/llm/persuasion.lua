@@ -19,6 +19,9 @@ M.DEFAULT_GMST = {
     iPerMinChange = 10,
     fFatigueBase = 1.25,
     fFatigueMult = 0.5,
+    fFightDispMult = 0.2,
+    iFightDistanceBase = 20,
+    fFightDistanceMultiplier = 0.005,
 }
 
 -- C++ int() truncates toward zero
@@ -54,7 +57,8 @@ end
 -- @param kind M.TYPES value
 -- @param disposition the NPC's current (derived) disposition, 0-100
 -- @param roll 0-99
--- @return { success = bool, temp = int, perm = int }: temp applies during the conversation, perm afterwards
+-- @return { success = bool, temp = int, perm = int, fight = int, flee = int }: temp applies during the conversation,
+--         perm afterwards; fight and flee are the changes to the NPC's AI ratings (vanilla Taunt and Intimidate)
 function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
     local g = gmst or M.DEFAULT_GMST
     local npc1, npc2 = M.ratings(npcStats, false, g)
@@ -67,6 +71,7 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
     local dieMult, tempMult = g.fPerDieRollMult, g.fPerTempMult
 
     local success, x, y = false, 0, 0
+    local fight, flee = 0, 0
     if kind == M.TYPES.admire then
         target1 = math.max(minChance, target1)
         success = roll <= target1
@@ -76,6 +81,12 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
         target2 = math.max(minChance, target2)
         success = roll <= target2
         local r = roll ~= target2 and math.floor(target2 - roll) or 1
+        if success then
+            -- Scared: more likely to flee, less likely to fight
+            local s = math.floor(r * dieMult * tempMult)
+            flee = trunc(math.max(minChange, s))
+            fight = trunc(math.min(-minChange, -s))
+        end
         local c = -math.abs(math.floor(r * dieMult))
         if success then
             if math.abs(c) < minChange then
@@ -93,6 +104,12 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
         target1 = math.max(minChance, target1)
         success = roll <= target1
         local c = math.abs(math.floor(target1 - roll))
+        if success then
+            -- Provoked: more likely to fight, less likely to flee
+            local s = c * dieMult * tempMult
+            flee = math.min(-trunc(minChange), trunc(-s))
+            fight = math.max(trunc(minChange), trunc(s))
+        end
         x = math.floor(-c * dieMult)
         if success and math.abs(x) < minChange then
             x = -minChange
@@ -117,8 +134,22 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
     else
         perm = trunc(temp / tempMult)
     end
-    return { success = success, temp = temp, perm = perm }
+    return { success = success, temp = temp, perm = perm, fight = fight, flee = flee }
 end
+
+-- The engine's aggression rule (getFightTerm in apps/openmw/mwmechanics/combat.cpp): at 100 or more the NPC attacks.
+-- @param fight the NPC's Fight rating (modified)
+-- @param distance distance to the player in game units
+-- @param disposition the NPC's derived disposition
+function M.fightTerm(fight, distance, disposition, gmst)
+    local g = gmst or M.DEFAULT_GMST
+    local distanceBias = g.iFightDistanceBase - g.fFightDistanceMultiplier * distance
+    local dispositionBias = (50 - disposition) * g.fFightDispMult
+    return fight + trunc(distanceBias + dispositionBias)
+end
+
+M.ATTACK_THRESHOLD = 100
+M.THREATENING_THRESHOLD = 80
 
 -- Repeating the same kind of attempt in one conversation stops working, so flattery can't be spammed
 M.MAX_ATTEMPTS_PER_KIND = 2

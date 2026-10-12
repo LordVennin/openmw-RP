@@ -264,6 +264,17 @@ return {
         LLMSetBaseDisposition = function(data)
             types.NPC.setBaseDisposition(data.npc, data.player, math.max(0, math.min(100, data.value)))
         end,
+        -- Fight/Flee changes from persuasion, applied by a script on the NPC itself
+        LLMModAI = function(data)
+            local npc = data.npc
+            if not npc:isValid() then
+                return
+            end
+            if not npc:hasScript('scripts/llm/npc.lua') then
+                npc:addScript('scripts/llm/npc.lua')
+            end
+            npc:sendEvent('LLMModAI', { fight = data.fight, flee = data.flee })
+        end,
         LLMFollow = startFollowing,
         LLMWait = wait,
         LLMDismiss = dismiss,

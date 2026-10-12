@@ -56,6 +56,10 @@ local lastPrompt = nil
 local conversation = nil
 -- Followers as last reported by the global script: npc id -> { npc, state, reason }
 local followerStates = {}
+-- NPCs who refuse to talk to the player until a game time: npc id -> game time (seconds)
+local blocked = {}
+-- Whether the NPC ended the AI conversation in the open dialogue window
+local chatEnded = false
 
 local function isEnabled()
     return generalSettings:get('enabled') ~= false
@@ -147,7 +151,7 @@ end
 
 local function setInput(enabled, hint)
     llm.setDialogueInput({
-        visible = isEnabled(),
+        visible = isEnabled() and not chatEnded,
         enabled = enabled,
         hint = hint or '',
         recallLabel = canRecall() and l10n('recall') or '',
@@ -185,7 +189,7 @@ end
 --   'transfer'       applying that
 -- Nothing changes hands without the player's click, so a wrong guess by the model costs nothing.
 local function isWaitingForServer(stage)
-    return stage == 'intent' or stage == 'reply' or stage == 'action'
+    return stage == 'intent' or stage == 'reply' or stage == 'action' or stage == 'leave'
 end
 
 local function cancelPending()
@@ -342,8 +346,9 @@ local function persuade(turn, kind)
             turn.npcName)
     end
     local disposition = types.NPC.getDisposition(npc, self.object)
+    local gmst = gmstValues()
     local result = persuasion.attempt(kind, persuasionStats(self.object), persuasionStats(npc), disposition,
-        math.random(0, 99), gmstValues())
+        math.random(0, 99), gmst)
     if not convo.originalBase then
         convo.originalBase = types.NPC.getBaseDisposition(npc, self.object)
     end
@@ -354,12 +359,34 @@ local function persuade(turn, kind)
     if kind == persuasion.TYPES.intimidate and result.success then
         convo.coerced = true
     end
+    if kind == persuasion.TYPES.taunt or (kind == persuasion.TYPES.intimidate and not result.success) then
+        convo.upset = true
+    end
+    if result.fight ~= 0 or result.flee ~= 0 then
+        core.sendGlobalEvent('LLMModAI', { npc = npc, fight = result.fight, flee = result.flee })
+    end
     local useTypes = I.SkillProgression.SKILL_USE_TYPES
     I.SkillProgression.skillUsed('speechcraft',
         { useType = result.success and useTypes.Speechcraft_Success or useTypes.Speechcraft_Fail })
-    print(string.format('LLM persuasion: %s %s -> %s, temporary %+d, permanent %+d', kind, npc.recordId,
-        result.success and 'success' or 'failure', result.temp, result.perm))
-    return string.format(persuasionOutcomes[kind][result.success], turn.npcName, turn.npcName)
+    local line = string.format(persuasionOutcomes[kind][result.success], turn.npcName, turn.npcName)
+
+    -- How close is the NPC to violence? The engine's own rule, with this attempt's changes included
+    local dispositionAfter = math.min(disposition + result.temp, disposition + result.perm)
+    local dx, dy = npc.position.x - self.position.x, npc.position.y - self.position.y
+    local fight = types.Actor.stats.ai.fight(npc).modified + result.fight
+    local term = persuasion.fightTerm(fight, math.sqrt(dx * dx + dy * dy), dispositionAfter, gmst)
+    if term >= persuasion.ATTACK_THRESHOLD then
+        turn.endReason = 'attack'
+        line = line .. string.format(' %s loses their temper and attacks the stranger.', turn.npcName)
+    elseif term >= persuasion.THREATENING_THRESHOLD then
+        line = line .. string.format(' %s is barely holding back from violence and threatens the stranger.', turn.npcName)
+    elseif dispositionAfter <= 20 then
+        turn.endReason = 'fedUp'
+        line = line .. string.format(' %s has had enough of the stranger and ends the conversation.', turn.npcName)
+    end
+    print(string.format('LLM persuasion: %s %s -> %s, temporary %+d, permanent %+d, fight %+d, fight term %d', kind,
+        npc.recordId, result.success and 'success' or 'failure', result.temp, result.perm, result.fight, term))
+    return line
 end
 
 -- At the end of a conversation, like vanilla: only the permanent part of persuasion remains
@@ -417,6 +444,10 @@ local startReply
 -- The player clicked one of the confirmation choices
 local function onChoice(choiceId)
     local turn = pending
+    if turn and turn.stage == 'ended' and choiceId == 'goodbye' then
+        I.UI.removeMode('Dialogue')
+        return
+    end
     if not turn or (turn.stage ~= 'confirmOffer' and turn.stage ~= 'confirmAction' and turn.stage ~= 'confirmFollow') then
         return
     end
@@ -653,6 +684,60 @@ local function onTransferApplied(result)
     end
 end
 
+local CHAT_BLOCK_HOURS = 24
+local ATTACK_BLOCK_HOURS = 72
+
+-- The NPC ends the AI conversation: notice, a single Goodbye choice, and they refuse to talk for a while
+local function endChat(turn, reason)
+    chatEnded = true
+    turn.stage = 'ended'
+    ui.showMessage(l10n('endsConversation', { name = turn.npcName }), { showInDialogue = true })
+    llm.setDialogueInput({ visible = false })
+    llm.setDialogueChoices({ { id = 'goodbye', label = l10n('goodbyeChoice') } })
+    local hours = reason == 'attack' and ATTACK_BLOCK_HOURS or CHAT_BLOCK_HOURS
+    blocked[turn.npc.id] = core.getGameTime() + hours * 3600
+    local event = reason == 'attack' and '%s lost their temper and attacked the stranger.'
+        or '%s angrily ended a conversation with the stranger.'
+    table.insert(historyFor(turn.npc).events, string.format(event, turn.npcName))
+end
+
+local function isUpset(turn)
+    return (conversation and conversation.npc == turn.npc and conversation.upset)
+        or types.NPC.getDisposition(turn.npc, self.object) < 40
+end
+
+local function onLeaveReply(id, reply, response)
+    if not pending or pending.id ~= id or pending.stage ~= 'leave' then
+        return
+    end
+    local turn = pending
+    local answer = decodeAnswer(response, 'leave check')
+    if answer and actions.evidenceFound(answer.evidence, reply) then
+        endChat(turn, 'leaves')
+        return
+    end
+    local ok, started = pcall(startActionCheck, turn, reply)
+    if not (ok and started) then
+        finishTurn()
+    end
+end
+
+-- While the NPC is upset: does their reply end the conversation?
+local function startLeaveCheck(turn, reply)
+    local body = {
+        prompt = actions.leavePrompt(template(), turn.npcName, playerName(), reply),
+        n_predict = 96,
+        temperature = 0,
+        stop = template().stop,
+    }
+    local id
+    local started = sendClassification(turn, body, actions.LEAVE_SCHEMA_JSON, 'leave', function(response)
+        onLeaveReply(id, reply, response)
+    end)
+    id = turn.id
+    return started
+end
+
 local function onReply(id, response)
     if not pending or pending.id ~= id or pending.stage ~= 'reply' then
         return
@@ -680,7 +765,20 @@ local function onReply(id, response)
         table.insert(history.turns, { role = 'user', text = turn.userText })
         table.insert(history.turns, { role = 'model', text = reply })
         llm.addDialogueResponse(reply)
-        if turn.followDecision then
+        if turn.endReason then
+            -- Decided before the reply (about to attack, or fed up): the reply played it out
+            endChat(turn, turn.endReason)
+            continues = true
+        elseif isUpset(turn) and actions.actionExit(reply) then
+            endChat(turn, 'leaves')
+            continues = true
+        elseif isUpset(turn) and not turn.followDecision and not turn.justHappened then
+            local okCheck, started = pcall(startLeaveCheck, turn, reply)
+            continues = okCheck and started
+            if not okCheck then
+                print('LLM leave check: ' .. tostring(started))
+            end
+        elseif turn.followDecision then
             -- The NPC agreed to come along in this reply: now the player confirms
             turn.stage = 'confirmFollow'
             llm.setDialogueChoices({
@@ -880,6 +978,15 @@ local function onUiModeChanged(data)
             dialogueNpc = data.arg
         end
         if freshWindow and dialogueNpc then
+            chatEnded = false
+            local refusedUntil = blocked[dialogueNpc.id]
+            if refusedUntil and core.getGameTime() < refusedUntil then
+                ui.showMessage(l10n('refusesToTalk', { name = types.NPC.record(dialogueNpc).name }))
+                dialogueNpc = nil
+                I.UI.removeMode('Dialogue')
+                return
+            end
+            blocked[dialogueNpc.id] = nil
             -- A fresh dialogue window starts with an empty history; everything saved so far can be recalled
             recalled = false
             local history = histories[dialogueNpc.id]
@@ -949,9 +1056,21 @@ local function onSave()
         for j = math.max(1, #allEvents - MAX_SAVED_EVENTS + 1), #allEvents do
             events[#events + 1] = allEvents[j]
         end
-        saved[ids[i]] = { greeting = history.greeting, turns = turns, events = events, lastUsed = history.lastUsed }
+        saved[ids[i]] = {
+            greeting = history.greeting,
+            turns = turns,
+            events = events,
+            lastUsed = history.lastUsed,
+        }
     end
-    return { version = SAVE_VERSION, histories = saved }
+    local now = core.getGameTime()
+    local stillBlocked = {}
+    for id, untilTime in pairs(blocked) do
+        if untilTime > now then
+            stillBlocked[id] = untilTime
+        end
+    end
+    return { version = SAVE_VERSION, histories = saved, blocked = stillBlocked }
 end
 
 local function onLoad(data)
@@ -959,6 +1078,7 @@ local function onLoad(data)
     if data and data.version == SAVE_VERSION and data.histories then
         histories = data.histories
     end
+    blocked = (data and data.blocked) or {}
 end
 
 return {

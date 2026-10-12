@@ -200,6 +200,42 @@ function M.intentPrompt(template, npcName, playerName, userLine, candidates, npc
     return promptText(template, system, lines)
 end
 
+-- Does the NPC's reply end the conversation? Only asked while the NPC is upset, so friendly NPCs never walk off
+-- because of a flourish in the reply. The answer is a quote, checked against the reply like the item checks.
+function M.leavePrompt(template, npcName, playerName, reply)
+    local system = 'You are the game master of a Morrowind role-play. Decide whether ' .. npcName .. ' ends the '
+        .. 'conversation with ' .. playerName .. ' in their latest reply: walks away, turns their back, refuses to '
+        .. 'talk any more, or tells ' .. playerName .. ' to leave. Actions written in asterisks count too, for '
+        .. 'example *walks away*. Being annoyed, rude or busy while still talking does not count. Answer with JSON only.'
+    local lines = {
+        npcName .. ': ' .. reply,
+        '',
+        'Answer as {"evidence": the exact words from ' .. npcName .. '\'s reply where they end the conversation, or '
+            .. '"none"}.',
+    }
+    return promptText(template, system, lines)
+end
+
+-- Exits written only as an action (the model rarely quotes stage directions), e.g. *walks away without a word*
+local exitActions = {
+    'walks? away', 'walks? off', 'storms? off', 'stalks? off', 'stomps? off', 'leaves', 'turns? %a+ back',
+    'turns? away', 'slams? the door',
+}
+
+function M.actionExit(reply)
+    for action in reply:lower():gmatch('%*([^*]+)%*') do
+        for _, pattern in ipairs(exitActions) do
+            if action:find(pattern) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+M.LEAVE_SCHEMA_JSON = '{"type":"object","properties":{"evidence":{"type":"string","maxLength":160}},'
+    .. '"required":["evidence"]}'
+
 local function jsonString(s)
     return '"' .. s:gsub('[%c"\\]', function(c)
         return string.format('\\u%04x', c:byte())

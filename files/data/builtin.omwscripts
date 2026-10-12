@@ -46,3 +46,4 @@ NPC,CREATURE: scripts/omw/music/actor.lua
 MENU: scripts/llm/settings.lua
 PLAYER: scripts/llm/player.lua
 GLOBAL: scripts/llm/global.lua
+CUSTOM: scripts/llm/npc.lua
