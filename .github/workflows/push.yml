@@ -1,8 +1,9 @@
 name: Build and test
 
+# Run by hand (Actions tab > Build and test > Run workflow, or `gh workflow run push.yml --ref <branch>`):
+# a full build takes about 45 minutes, too long to run on every push.
 on:
-- push
-- pull_request
+  workflow_dispatch:
 
 env:
   BUILD_TYPE: RelWithDebInfo
