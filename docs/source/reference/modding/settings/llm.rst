@@ -22,12 +22,20 @@ Requests are only ever sent to 127.0.0.1.
    Empty uses the one bundled in the ``llama`` folder next to the openmw executable.
 
 .. omw-setting::
+   :title: models folder
+   :type: string
+   :default: ""
+
+   Folder where models are kept and where the launcher downloads them.
+   Empty uses a ``models`` folder next to the openmw executable,
+   or the ``models`` folder of the user data directory if the game's folder is not writable.
+
+.. omw-setting::
    :title: model
    :type: string
    :default: ""
 
-   Path to the model file (.gguf).
-   Empty uses the first .gguf file in the ``models`` folder of the user data directory.
+   Path to the model file (.gguf). Empty uses the first .gguf file in the models folder.
 
 .. omw-setting::
    :title: device
@@ -50,10 +58,20 @@ Requests are only ever sent to 127.0.0.1.
 .. omw-setting::
    :title: gpu layers
    :type: int
-   :range: 0 to 999
-   :default: 99
+   :range: -1 to 999
+   :default: -1
 
-   Number of model layers offloaded to the GPU. Lower it if the model does not fit in video memory.
+   Number of model layers run on the GPU; the rest run on the CPU, which is much slower.
+   -1 puts as many layers on the GPU as fit while keeping :ref:`vram reserve` free.
+
+.. omw-setting::
+   :title: vram reserve
+   :type: int
+   :range: 0 to 65536
+   :default: 3072
+
+   With automatic GPU layers, the video memory in MiB kept free for the game and its mods.
+   Raise it when using texture or mesh replacers.
 
 .. omw-setting::
    :title: port

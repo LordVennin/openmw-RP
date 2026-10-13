@@ -70,7 +70,7 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [x] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
 - [x] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`). Also a setting for how long an NPC refuses to talk after ending a conversation (off, short, or the current 24h/72h).
 - [x] Phase 3: write the Lua mod: card loader, prompt builder, chat window. Built as a text input inside the vanilla dialogue window (see below).
-- [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
+- [x] Phase 3.5: launcher AI tab: GPU detection, model download, settings (see below).
 - [ ] Phase 4: add game actions, memory, and the lorebook. In progress:
   - [x] item and gold exchange, confirmed with dialogue choices
   - [x] quest effects and rewards taken from vanilla handover dialogue
@@ -163,15 +163,44 @@ The player then sees a notice and a single Goodbye choice. The NPC refuses to ta
 
 **Start-up** (`apps/openmw/mwlua/llmserver.cpp`): a monitor thread started with the game.
 1. If a server already answers on `[LLM] port`, it is used ("external").
-2. Otherwise, with `server autostart` on, it finds the model (`[LLM] model`, or the first `.gguf` in `<user data>/models/`) and the device. `auto` runs `llama-server --list-devices` and takes the first CUDA, ROCm, Vulkan or Metal device, else the CPU. Only one device is passed, so the same GPU is never used twice through two backends.
+2. Otherwise, with `server autostart` on, it finds the model (`[LLM] model`, or the first `.gguf` in the models folder) and the device. `auto` runs `llama-server --list-devices` and takes the first CUDA, ROCm, Vulkan or Metal device, else the CPU. Only one device is passed, so the same GPU is never used twice through two backends.
 3. It starts llama-server hidden on the first free port from `[LLM] port`, polls `/health` until the model is loaded, and reads the real context size from `/props`.
 4. The server is stopped when the game exits. If the game crashes, Linux stops it through `PR_SET_PDEATHSIG` and Windows through a kill-on-close job object.
 
 **Lua:** `openmw.llm.serverStatus()` returns `state` (`starting`, `ready`, `external`, `disabled`, `noModel` or `failed`), `contextSize`, `model`, `device` and `error`. The prompt budget uses the server's context size, so it always matches `-c`. Until the server is ready, the text box is disabled with a hint and enables itself.
 
-**Settings for players:** `[LLM]` in `settings.cfg` for now (the server can only be configured before it starts); the 3.5 launcher tab will edit them and ask for the device at setup. In game, AI Dialogue → General → Refusal Duration sets how long an NPC refuses to talk after ending a conversation.
+**Settings for players:** `[LLM]` in `settings.cfg`, edited in the launcher's AI Dialogue tab (Phase 3.5); the server can only be configured before it starts. In game, AI Dialogue → General → Refusal Duration sets how long an NPC refuses to talk after ending a conversation.
 
 Windows process code is written but not yet compiled or tested.
+
+## Phase 3.5: the launcher's AI Dialogue tab
+
+`apps/launcher/aipage.cpp`, with two sub-tabs that fit the launcher's default window. The device, model and server logic it shares with the game is in `components/llm/server.cpp`, so the Test button runs exactly what the game runs.
+
+**Model tab**
+- **Use:** the installed models (every `.gguf` in the models folder), or Browse… for another file. The chosen one is saved as `[LLM] model`.
+- **Folder:** where models are kept, with Open and Change… (`[LLM] models folder`). By default it is a visible `models` folder next to the game, or the user data folder if the game's folder isn't writable.
+- **Download list:** `files/launcher/llm-models.json` (Gemma4-12B-RP Q6_K, Q4_K_M, IQ4_XS and Q3_K_M, plus Rocinante XL as an alternative), marked Fits / Tight / Too large / Recommended for the selected GPU. Downloads come from Hugging Face with progress, speed and time left. They can be cancelled and resume where they stopped, and are checked against the SHA256 before being installed.
+
+**Performance tab**
+- **Run on:** Automatic, CPU, or a device found by `llama-server --list-devices` (`[LLM] device`).
+- **Context size**, with a video memory estimate.
+- **GPU layers:** Auto (the default) uses llama.cpp's `--fit` to put as many layers on the GPU as fit while keeping **Keep free for the game** (`[LLM] vram reserve`, default 3 GB) free. The rest run on the CPU. A number sets the layers by hand; the model's layer count is read from its GGUF metadata.
+- **Port, start with the game, extra arguments.**
+- **Test:** starts the server on a spare port, asks for one sentence, and reports the load time, tokens per second and how many layers ran on the GPU.
+
+**Instruct template:** the in-game setting defaults to Automatic, picked from the model's file name (`templates.forModel`). For a hand-run server, the name comes from its `/props`.
+
+**Measured on the RTX 4090** with Gemma Q6_K:
+
+| Setting | Load time | Speed | Layers on GPU |
+|---|---|---|---|
+| CUDA | 3 s | 68 tokens/s | all 49 |
+| Vulkan | 7 s | 63 tokens/s | all 49 |
+| Auto with 16 GB kept free (like an 8 GB card) | | 9 tokens/s | 28 of 49 |
+| CPU only | | about 2 minutes per reply | none |
+
+**Tests:** the Lua test harness and suites live in the git-ignored `tests/llm/` (`tests/llm/run.sh`), with `tests/llm/uipreview/` rendering the tab's layout offscreen.
 
 ## Dev setup
 
@@ -187,7 +216,7 @@ llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs o
 | `gemma-4-12b-it-Q6_K.gguf` (9.8 GB) | [unsloth](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF) | Gemma 4 | Base model. |
 | `gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf` (9.8 GB) | [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-it-roleplay-sft-epoch2-bf16-GGUF) | Gemma 4 | **Broken on this llama.cpp build:** gibberish even through SillyTavern, though it works in oobabooga. Don't use. |
 
-**The game starts the server itself** (Phase 2.5). The build puts `llama-server` and its backend plug-ins in `build/llama/`, and the game starts it from there, with the first `.gguf` in `~/.local/share/openmw/models/` (the dev models are symlinked there). Settings are in the `[LLM]` section of `settings.cfg`. The server's output goes to `~/.config/openmw/llama-server.log`.
+**The game starts the server itself** (Phase 2.5). The build puts `llama-server` and its backend plug-ins in `build/llama/`, and the game starts it from there with the model chosen in the launcher, from `build/models/` (the dev models are symlinked there). Settings are in the `[LLM]` section of `settings.cfg`. The server's output goes to `~/.config/openmw/llama-server.log`.
 
 **Hand-run server**, for testing models outside the game. The game uses it instead of starting its own while it runs on the `[LLM] port` (8080):
 

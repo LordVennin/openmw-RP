@@ -1,0 +1,51 @@
+{
+    "_comment": "Models the launcher's AI tab recommends. minVramMiB: the smallest GPU (total video memory) the model is recommended for with an 8K context, leaving room for the game. sha256 and size come from Hugging Face.",
+    "models": [
+        {
+            "name": "Gemma4-12B-RP (Q6_K)",
+            "description": "Gemma 4 12B role-play fine-tune, high quality. The default.",
+            "repo": "mradermacher/Gemma4-12B-RP-i1-GGUF",
+            "file": "Gemma4-12B-RP.i1-Q6_K.gguf",
+            "size": 9786022592,
+            "sha256": "f0c61bb302aae77cfafd4e1a3503d1ff80fb605dd11409a669e941d56d98d5d1",
+            "minVramMiB": 16384
+        },
+        {
+            "name": "Gemma4-12B-RP (Q4_K_M)",
+            "description": "The same model, smaller, for 12 GB cards.",
+            "repo": "mradermacher/Gemma4-12B-RP-i1-GGUF",
+            "file": "Gemma4-12B-RP.i1-Q4_K_M.gguf",
+            "size": 7381383872,
+            "sha256": "a95463774b8c98ef933834d15fa54d8ee0b69bc9377842a6c2ae2d744e5e886f",
+            "minVramMiB": 12288
+        },
+        {
+            "name": "Gemma4-12B-RP (IQ4_XS)",
+            "description": "The same model, smaller still, for 10 GB cards.",
+            "repo": "mradermacher/Gemma4-12B-RP-i1-GGUF",
+            "file": "Gemma4-12B-RP.i1-IQ4_XS.gguf",
+            "size": 6635256512,
+            "sha256": "1c5090df5960a9352d0f9b089ef98d751a0f765b750b906250de3949d91d166e",
+            "minVramMiB": 10240
+        },
+        {
+            "name": "Gemma4-12B-RP (Q3_K_M)",
+            "description": "The smallest version, for 8 GB cards. Partly runs on the CPU, so replies are slower.",
+            "repo": "mradermacher/Gemma4-12B-RP-i1-GGUF",
+            "file": "Gemma4-12B-RP.i1-Q3_K_M.gguf",
+            "size": 6087088832,
+            "sha256": "202422fc05dcfdaede514618a0a2d8495f93d59674af5706e14c78ff80db7869",
+            "minVramMiB": 8192
+        },
+        {
+            "name": "Rocinante XL 16B (Q5_K_M)",
+            "description": "Mistral Nemo role-play fine-tune with richer prose. An alternative for large cards.",
+            "repo": "bartowski/TheDrummer_Rocinante-XL-16B-v1-GGUF",
+            "file": "TheDrummer_Rocinante-XL-16B-v1-Q5_K_M.gguf",
+            "size": 11675369536,
+            "sha256": "fdbddaac5cb27c1a037f62f3e1fcb14435cb7208e64a6e1e4cab14e26773653a",
+            "minVramMiB": 20480,
+            "alternative": true
+        }
+    ]
+}

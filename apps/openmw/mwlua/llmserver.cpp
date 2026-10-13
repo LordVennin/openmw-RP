@@ -16,6 +16,7 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/files/conversion.hpp>
+#include <components/llm/server.hpp>
 #include <components/settings/values.hpp>
 
 #ifdef _WIN32
@@ -45,12 +46,6 @@ namespace MWLua
         constexpr auto sListDevicesTimeout = std::chrono::seconds(30);
         constexpr auto sStopTimeout = std::chrono::seconds(5);
 
-#ifdef _WIN32
-        constexpr const char* sServerExecutable = "llama-server.exe";
-#else
-        constexpr const char* sServerExecutable = "llama-server";
-#endif
-
         enum class Health
         {
             None, // nothing answers
@@ -73,20 +68,34 @@ namespace MWLua
             return Health::None;
         }
 
-        // The context size the server runs with, from /props
-        std::optional<int> fetchContextSize(int port)
+        struct Props
         {
+            std::optional<int> mContextSize;
+            std::string mModel; // file name
+        };
+
+        // The context size and model the server runs with, from /props
+        Props fetchProps(int port)
+        {
+            Props props;
             httplib::Client client(sHost, port);
             client.set_connection_timeout(0, 500'000);
             client.set_read_timeout(2, 0);
             httplib::Result response = client.Get("/props");
             if (!response || response->status != 200)
-                return std::nullopt;
+                return props;
             static const std::regex nCtx(R"("n_ctx"\s*:\s*(\d+))");
+            static const std::regex modelPath(R"re("model_path"\s*:\s*"((?:[^"\\]|\\.)*)")re");
             std::smatch match;
-            if (!std::regex_search(response->body, match, nCtx))
-                return std::nullopt;
-            return std::stoi(match[1].str());
+            if (std::regex_search(response->body, match, nCtx))
+                props.mContextSize = std::stoi(match[1].str());
+            if (std::regex_search(response->body, match, modelPath))
+            {
+                const std::string path = match[1].str();
+                const std::size_t slash = path.find_last_of("/\\");
+                props.mModel = slash == std::string::npos ? path : path.substr(slash + 1);
+            }
+            return props;
         }
 
         bool isPortFree(int port)
@@ -122,36 +131,6 @@ namespace MWLua
                 if (isPortFree(port))
                     return port;
             return std::nullopt;
-        }
-
-        std::optional<std::filesystem::path> findModel(const std::filesystem::path& userDataDir)
-        {
-            const std::string& setting = Settings::llm().mModel;
-            if (!setting.empty())
-                return Files::pathFromUnicodeString(setting);
-            const std::filesystem::path modelsDir = userDataDir / "models";
-            std::error_code ec;
-            std::vector<std::filesystem::path> models;
-            for (const auto& entry : std::filesystem::directory_iterator(modelsDir, ec))
-            {
-                std::string extension = Files::pathToUnicodeString(entry.path().extension());
-                std::transform(extension.begin(), extension.end(), extension.begin(),
-                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (entry.is_regular_file(ec) && extension == ".gguf")
-                    models.push_back(entry.path());
-            }
-            if (models.empty())
-                return std::nullopt;
-            std::sort(models.begin(), models.end());
-            return models.front();
-        }
-
-        std::filesystem::path findServer(const std::filesystem::path& executableDir)
-        {
-            const std::string& setting = Settings::llm().mServerPath;
-            if (!setting.empty())
-                return Files::pathFromUnicodeString(setting);
-            return executableDir / "llama" / sServerExecutable;
         }
 
         std::string readFile(const std::filesystem::path& path)
@@ -431,37 +410,6 @@ namespace MWLua
         throw std::logic_error("Unknown LLM server state");
     }
 
-    std::string LlmServer::chooseDevice(std::string_view listDevicesOutput)
-    {
-        // Lines look like "  CUDA0: NVIDIA GeForce RTX 4090 (24076 MiB, 23000 MiB free)"
-        static const std::regex deviceLine(R"(^\s+([A-Za-z]+)(\d+):\s)");
-        static constexpr std::array preferred{ "CUDA", "ROCm", "Vulkan", "Metal" };
-        std::vector<std::pair<std::string, std::string>> devices; // backend, name
-        std::istringstream lines{ std::string(listDevicesOutput) };
-        std::string line;
-        while (std::getline(lines, line))
-        {
-            std::smatch match;
-            if (std::regex_search(line, match, deviceLine))
-                devices.emplace_back(match[1].str(), match[1].str() + match[2].str());
-        }
-        for (std::string_view backend : preferred)
-            for (const auto& [deviceBackend, name] : devices)
-                if (deviceBackend == backend)
-                    return name;
-        return "cpu";
-    }
-
-    std::vector<std::string> LlmServer::splitArguments(std::string_view arguments)
-    {
-        std::vector<std::string> result;
-        std::istringstream stream{ std::string(arguments) };
-        std::string argument;
-        while (stream >> argument)
-            result.push_back(argument);
-        return result;
-    }
-
     void LlmServer::setStatus(State state, std::string error)
     {
         if (!error.empty())
@@ -492,11 +440,11 @@ namespace MWLua
                 while (checkHealth(configuredPort) == Health::Loading)
                     if (!sleep(stopToken, sPollInterval))
                         return;
-                if (std::optional<int> contextSize = fetchContextSize(configuredPort))
-                {
-                    std::lock_guard lock(mMutex);
-                    mStatus.mContextSize = *contextSize;
-                }
+                const Props props = fetchProps(configuredPort);
+                std::lock_guard lock(mMutex);
+                if (props.mContextSize.has_value())
+                    mStatus.mContextSize = *props.mContextSize;
+                mStatus.mModel = props.mModel;
                 return;
             }
             if (!Settings::llm().mServerAutostart)
@@ -527,12 +475,13 @@ namespace MWLua
 
     bool LlmServer::startBundled(std::stop_token stopToken)
     {
-        const std::optional<std::filesystem::path> model = findModel(mPaths.mUserDataDir);
+        const std::filesystem::path modelsDir = LLM::modelsDir(mPaths.mExecutableDir, mPaths.mUserDataDir);
+        const std::optional<std::filesystem::path> model = LLM::findModel(modelsDir);
         if (!model.has_value())
         {
             setStatus(State::NoModel,
                 "no model found: set [LLM] model, or put a .gguf file in "
-                    + Files::pathToUnicodeString(mPaths.mUserDataDir / "models"));
+                    + Files::pathToUnicodeString(modelsDir));
             return false;
         }
         if (!std::filesystem::exists(*model))
@@ -540,7 +489,7 @@ namespace MWLua
             setStatus(State::NoModel, "model file not found: " + Files::pathToUnicodeString(*model));
             return false;
         }
-        const std::filesystem::path server = findServer(mPaths.mExecutableDir);
+        const std::filesystem::path server = LLM::serverPath(mPaths.mExecutableDir);
         if (!std::filesystem::exists(server))
         {
             setStatus(State::Failed, "llama-server not found: " + Files::pathToUnicodeString(server));
@@ -558,17 +507,8 @@ namespace MWLua
                     if (!sleep(stopToken, std::chrono::milliseconds(50)))
                         return false;
             }
-            device = chooseDevice(readFile(devicesFile));
+            device = LLM::chooseDevice(LLM::parseDevices(readFile(devicesFile)));
         }
-
-        const int contextSize = Settings::llm().mContextSize;
-        std::vector<std::string> arguments{ "--model", model->string(), "--ctx-size", std::to_string(contextSize),
-            "--parallel", "1", "--host", sHost };
-        if (device == "cpu")
-            arguments.insert(arguments.end(), { "--device", "none", "--n-gpu-layers", "0" });
-        else
-            arguments.insert(arguments.end(),
-                { "--device", device, "--n-gpu-layers", std::to_string(Settings::llm().mGpuLayers.get()) });
 
         const std::optional<int> port = findFreePort(Settings::llm().mPort);
         if (!port.has_value())
@@ -576,9 +516,8 @@ namespace MWLua
             setStatus(State::Failed, "no free port for llama-server");
             return false;
         }
-        arguments.insert(arguments.end(), { "--port", std::to_string(*port) });
-        for (std::string& argument : splitArguments(Settings::llm().mExtraArguments.get()))
-            arguments.push_back(std::move(argument));
+        const LLM::ServerOptions options = LLM::optionsFromSettings(*model, device, *port);
+        const int contextSize = options.mContextSize;
 
         const std::string modelName = Files::pathToUnicodeString(model->filename());
         {
@@ -591,7 +530,8 @@ namespace MWLua
         setStatus(State::Starting);
         Log(Debug::Info) << "Starting llama-server on port " << *port << " with " << modelName << " on " << device
                          << ", context " << contextSize;
-        mProcess = std::make_unique<ChildProcess>(server, arguments, mPaths.mLogDir / "llama-server.log");
+        mProcess = std::make_unique<ChildProcess>(
+            server, LLM::serverArguments(options), mPaths.mLogDir / "llama-server.log");
 
         const auto deadline = std::chrono::steady_clock::now() + sLoadTimeout;
         while (true)
@@ -613,7 +553,7 @@ namespace MWLua
                 return false;
             }
         }
-        if (std::optional<int> reported = fetchContextSize(*port))
+        if (std::optional<int> reported = fetchProps(*port).mContextSize)
         {
             std::lock_guard lock(mMutex);
             mStatus.mContextSize = *reported;

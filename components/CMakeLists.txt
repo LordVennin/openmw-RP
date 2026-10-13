@@ -302,6 +302,10 @@ add_component_dir (misc
     rng strongtypedef thread timeconvert timer tuplehelpers tuplemeta utf8stream weakcache windows
     )
 
+add_component_dir (llm
+    server
+    )
+
 add_component_dir (misc/strings
     algorithm conversion format lower
     )

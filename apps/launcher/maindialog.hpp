@@ -22,6 +22,7 @@ namespace Files
 
 namespace Launcher
 {
+    class AiPage;
     class GraphicsPage;
     class DataFilesPage;
     class UnshieldThread;
@@ -57,6 +58,7 @@ namespace Launcher
         void enableGraphicsPage();
         void enableSettingsPage();
         void enableImportPage();
+        void enableAiPage();
         void play();
         void help();
 
@@ -95,6 +97,7 @@ namespace Launcher
         DataFilesPage* mDataFilesPage;
         ImportPage* mImportPage;
         SettingsPage* mSettingsPage;
+        AiPage* mAiPage;
 
         Process::ProcessInvoker* mGameInvoker;
         Process::ProcessInvoker* mWizardInvoker;

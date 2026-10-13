@@ -7,6 +7,7 @@ set(LAUNCHER
     textslotmsgbox.cpp
     importpage.cpp
     settingspage.cpp
+    aipage.cpp
 
     utils/cellnameloader.cpp
     utils/profilescombobox.cpp
@@ -25,6 +26,7 @@ set(LAUNCHER_HEADER
     textslotmsgbox.hpp
     importpage.hpp
     settingspage.hpp
+    aipage.hpp
 
     utils/cellnameloader.hpp
     utils/profilescombobox.hpp
@@ -74,7 +76,7 @@ target_link_libraries(openmw-launcher PUBLIC
     components_qt
 )
 
-target_link_libraries(openmw-launcher PUBLIC Qt::Widgets Qt::Core Qt::Svg)
+target_link_libraries(openmw-launcher PUBLIC Qt::Widgets Qt::Core Qt::Svg Qt::Network)
 
 if (WIN32)
     target_sources(openmw-launcher PRIVATE ${CMAKE_SOURCE_DIR}/files/windows/other-apps.manifest)

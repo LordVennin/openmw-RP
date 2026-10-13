@@ -2,6 +2,133 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en">
 <context>
+    <name>AiPage</name>
+    <message>
+        <source>Run on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The device the model runs on. Automatic picks the best GPU found. The CPU works on every computer but replies are much slower.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Detect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On this computer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Start the AI server when the game starts, and stop it when the game exits. Turn off to use a server you start yourself.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Context size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How much text the model sees at once, in tokens. Larger contexts let NPCs know and remember more, but use more video memory.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU layers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Port of a server you start yourself. The game&apos;s own server uses the first free port from here.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Extra arguments</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Extra command line arguments for llama-server, separated by spaces.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Starts the server with these settings, asks the model for a short reply, then stops the server.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How many layers of the model run on the GPU; the rest run on the CPU, which is much slower. Auto puts as many on the GPU as fit while keeping the memory below free for the game.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep free for the game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;With Auto GPU layers: video memory left free for Morrowind and its mods. Raise it for texture and mesh replacers; the model then runs a little more on the CPU.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> GB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download a model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Performance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start the server with the game</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>DataFilesPage</name>
     <message>
         <source>Content Files</source>
@@ -294,6 +421,217 @@ to default Morrowind fonts. Check this box if you still prefer original fonts ov
     <message>
         <source>Run &amp;Settings Importer</source>
         <translation></translation>
+    </message>
+</context>
+<context>
+    <name>Launcher::AiPage</name>
+    <message>
+        <source>llama-server was not found at %1, so AI dialogue can&apos;t run.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Looking for GPUs…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not run llama-server to detect GPUs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> (CPU)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>CPU only (slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No GPU found. The model will run on the CPU, which is much slower.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Found: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GGUF models (*.gguf);;All files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Runs on the CPU (slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tight: little memory left for the game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Too large: partly on the CPU, slower</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended. %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About %1 of video memory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> (more than this GPU has)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not create %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is already installed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not write %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not enough disk space: %1 needed in %2.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading %1: %2 of %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>, %1 MB/s, about %2 min left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not write %1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download paused. Click Download to resume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download failed: %1. Click Download to resume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download incomplete. Click Download to resume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking the download…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The download was damaged and has been deleted. Please try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not rename %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is installed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Test stopped.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>llama-server was not found at %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Still looking for GPUs. Try again in a moment.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No model installed. Download one above first.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No free network port for the test.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server stopped while loading (exit code %1). Its last messages are below.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not start llama-server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1 on %2…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The model did not finish loading.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loaded in %1 s. Asking for a reply…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server did not answer: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Works. Loaded in %1 s, replies at %2 tokens per second.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder for AI models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No model installed: download one below</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>As many of the %1 layers as fit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>of %1 layers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> %1 of %2 layers ran on the GPU.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -660,6 +998,14 @@ Logs and settings changed through the launcher and in-game will be saved here.</
     <message>
         <source>Allows to import data from original engine</source>
         <translation></translation>
+    </message>
+    <message>
+        <source>AI Dialogue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allows to set up AI dialogue with NPCs</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

@@ -100,6 +100,7 @@
    <addaction name="graphicsAction"/>
    <addaction name="settingsAction"/>
    <addaction name="importAction"/>
+   <addaction name="aiAction"/>
   </widget>
   <action name="dataAction">
    <property name="checkable">
@@ -165,6 +166,21 @@
    </property>
    <property name="toolTip">
     <string>Allows to import data from original engine</string>
+   </property>
+  </action>
+  <action name="aiAction">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="../../../files/launcher/launcher.qrc">
+     <normaloff>:/images/ai-dialogue.svg</normaloff>:/images/ai-dialogue.svg</iconset>
+   </property>
+   <property name="text">
+    <string>AI Dialogue</string>
+   </property>
+   <property name="toolTip">
+    <string>Allows to set up AI dialogue with NPCs</string>
    </property>
   </action>
  </widget>

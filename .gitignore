@@ -92,3 +92,4 @@ Thumbs.db
 
 # Screenshots and logs shared with Claude Code during development
 /screenshots/
+/tests/llm/

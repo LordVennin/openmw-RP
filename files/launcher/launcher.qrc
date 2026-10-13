@@ -6,6 +6,10 @@
     <file alias="preferences.png">images/preferences.png</file>
     <file alias="preferences-advanced.png">images/preferences-advanced.png</file>
     <file alias="preferences-video.png">images/preferences-video.png</file>
+    <file alias="ai-dialogue.svg">images/ai-dialogue.svg</file>
+</qresource>
+<qresource prefix="llm">
+    <file alias="models.json">llm-models.json</file>
 </qresource>
 <qresource prefix="icons/fallback">
     <file alias="index.theme">icons/fallback/index.theme</file>

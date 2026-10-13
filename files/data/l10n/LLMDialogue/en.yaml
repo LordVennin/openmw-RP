@@ -57,9 +57,11 @@ nowHeading: "Now"
 template: "Instruct Template"
 templateDescription: |
     The prompt format the model was trained on. Check the model card.
+      Automatic: chosen from the model's file name (Gemma 4 if not recognised).
       Gemma 4: Gemma 4 models and fine-tunes.
       Metharme: many Mistral Nemo role-play fine-tunes, such as Rocinante.
       Mistral Tekken: Mistral Nemo models using the Mistral v3 Tekken format.
+auto: "Automatic"
 gemma4: "Gemma 4"
 metharme: "Metharme"
 mistralTekken: "Mistral Tekken"

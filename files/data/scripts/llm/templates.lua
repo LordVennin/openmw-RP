@@ -55,8 +55,31 @@ local samplers = {
     repeat_last_n = 550,
 }
 
+-- Model file name patterns (lower case) and the template their family was trained on, checked in order.
+-- Mistral Nemo role-play fine-tunes such as Rocinante mostly use Metharme.
+local byModelName = {
+    { 'gemma', 'gemma4' },
+    { 'tekken', 'mistralTekken' },
+    { 'rocinante', 'metharme' },
+    { 'metharme', 'metharme' },
+    { 'pygmalion', 'metharme' },
+    { 'nemo', 'metharme' },
+}
+
+-- The template for a model file name, or nil if it's not recognised
+local function forModel(fileName)
+    local lower = (fileName or ''):lower()
+    for _, entry in ipairs(byModelName) do
+        if lower:find(entry[1], 1, true) then
+            return entry[2]
+        end
+    end
+    return nil
+end
+
 return {
     templates = templates,
     samplers = samplers,
     default = 'gemma4',
+    forModel = forModel,
 }

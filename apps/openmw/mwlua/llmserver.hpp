@@ -43,8 +43,8 @@ namespace MWLua
 
         struct Paths
         {
-            std::filesystem::path mExecutableDir; // where the bundled "llama" folder is
-            std::filesystem::path mUserDataDir; // where the "models" folder is
+            std::filesystem::path mExecutableDir; // where the bundled "llama" folder and the default models folder are
+            std::filesystem::path mUserDataDir; // where models are if the game's folder is not writable
             std::filesystem::path mLogDir; // where llama-server.log is written
         };
 
@@ -60,13 +60,6 @@ namespace MWLua
         int port() const { return mPort; }
 
         static std::string_view stateName(State state);
-
-        // Picks the device "auto" means from `llama-server --list-devices` output: the first CUDA, ROCm,
-        // Vulkan or Metal device, in that order, or "cpu" if there is no GPU.
-        static std::string chooseDevice(std::string_view listDevicesOutput);
-
-        // Splits the "extra arguments" setting on whitespace.
-        static std::vector<std::string> splitArguments(std::string_view arguments);
 
     private:
         void run(std::stop_token stopToken);

@@ -62,8 +62,8 @@ I.Settings.registerGroup({
             renderer = 'select',
             name = 'template',
             description = 'templateDescription',
-            default = 'gemma4',
-            argument = { l10n = 'LLMDialogue', items = { 'gemma4', 'metharme', 'mistralTekken' } },
+            default = 'auto',
+            argument = { l10n = 'LLMDialogue', items = { 'auto', 'gemma4', 'metharme', 'mistralTekken' } },
         },
         {
             key = 'sceneDetail',

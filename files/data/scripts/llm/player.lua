@@ -79,8 +79,11 @@ end
 local waitingForServer = false
 
 local function template()
-    return templates.templates[advancedSettings:get('template') or templates.default]
-        or templates.templates[templates.default]
+    local name = advancedSettings:get('template') or 'auto'
+    if name == 'auto' then
+        name = templates.forModel(llm.serverStatus().model) or templates.default
+    end
+    return templates.templates[name] or templates.templates[templates.default]
 end
 
 local function playerName()
