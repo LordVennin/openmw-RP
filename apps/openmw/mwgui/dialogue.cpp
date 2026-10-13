@@ -382,7 +382,7 @@ namespace MWGui
 
     bool DialogueWindow::exit()
     {
-        if ((MWBase::Environment::get().getDialogueManager()->isInChoice()))
+        if (MWBase::Environment::get().getDialogueManager()->isInChoice() || mLuaBusy)
         {
             return false;
         }
@@ -570,6 +570,7 @@ namespace MWGui
         // Reset history
         mHistoryContents.clear();
         mLuaChoices.clear();
+        mLuaBusy = false;
     }
 
     bool DialogueWindow::setKeywords(const std::list<std::string>& keyWords)
@@ -760,7 +761,8 @@ namespace MWGui
             onScrollbarMoved(mScrollBar, 0);
         }
 
-        bool goodbyeEnabled = !MWBase::Environment::get().getDialogueManager()->isInChoice() || mGoodbye;
+        bool goodbyeEnabled
+            = (!MWBase::Environment::get().getDialogueManager()->isInChoice() || mGoodbye) && !mLuaBusy;
         bool goodbyeWasEnabled = mGoodbyeButton->getEnabled();
         mGoodbyeButton->setEnabled(goodbyeEnabled);
         if (goodbyeEnabled && !goodbyeWasEnabled)
@@ -874,6 +876,14 @@ namespace MWGui
     void DialogueWindow::setLuaChoices(std::vector<std::pair<std::string, std::string>> choices)
     {
         mLuaChoices = std::move(choices);
+        updateHistory();
+    }
+
+    void DialogueWindow::setLuaBusy(bool busy)
+    {
+        if (mLuaBusy == busy)
+            return;
+        mLuaBusy = busy;
         updateHistory();
     }
 

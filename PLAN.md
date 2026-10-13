@@ -80,6 +80,14 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
   - [x] rolling memory summaries
   - [x] other actions (attack, ending the conversation)
   - [ ] running vanilla result scripts faithfully (needs an engine binding to execute MWScript)
+- [ ] Phase 5: sturdier actions before more character content (see below). In progress:
+  - [x] the dialogue window can't be closed while the NPC is answering
+  - [x] action registry: one module per action
+  - [x] NPC services through conversation, asked for by the player or offered by the NPC
+  - [x] vanilla service gates (guild membership and rank, refusals) checked by the engine
+  - [ ] streaming replies, as an option in the settings
+  - [ ] more actions on the registry (bribes, bounties, topics)
+- [ ] Character content: more cards and lore. Secret memberships (e.g. Blades trainers) must stay secret: the `[Scene]` note currently lists every faction the NPC belongs to, so cards or a secret-faction list need to tell the model to hide them.
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
 
@@ -152,6 +160,27 @@ Notices mark each change.
 The player then sees a notice and a single Goodbye choice. The NPC refuses to talk for 24 game hours (72 after an attack), saved with the game.
 
 **Memory:** when a window closes on a history longer than 16 turns, everything but the last 8 turns is summarized in the background, merged with any earlier summary. The summary is saved, given to the model as `[What X remembers]` within its own budget share, and shown first in Recall.
+
+## Phase 5: actions
+
+**Closing mid-reply:** while the turn waits for the server or the global script, Goodbye and Escape can't close the dialogue window, as vanilla does during a dialogue choice. This uses `openmw.llm.setDialogueBusy`. Requests time out (60 s for checks, 120 s for the reply), so a dead server can't trap the player.
+
+**The action registry** (`scripts/llm/actions/`): each action is one module (`give`, `persuade`, `follow`, `service`). A module declares entries for two checks:
+- **intents:** what the player does in their line, decided before the reply;
+- **proposals:** what the NPC offers in their reply, decided afterwards.
+
+Each entry says when it's possible, its one-line description, the answer fields it needs and how it runs. `registry.lua` builds each check's prompt and JSON schema from the entries possible this turn. For example:
+- `wait` is offered only to a follower;
+- `give` only when the player mentions something they carry;
+- `service` only to NPCs with services.
+
+Fewer options make the classifier more accurate. `player.lua` gives actions a small API (`game`): choices before or after the reply, the global-script round trip, notes for the reply, and history events. Declining a choice is told to the model. Adding an action means adding a module and listing it in the registry.
+
+**Services:** asking to trade, train, travel, buy spells, make spells, enchant or repair opens the vanilla window (`I.UI.addMode(mode, {target = npc})`) after a "Barter" / "Not now" choice, as clicking the service topic does.
+- **Offered services:** only those the NPC really offers (`servicesOffered`, travel destinations).
+- **Refusals:** the engine's own dialogue filter evaluates vanilla's "Service Refusal" dialogue (`openmw.llm.serviceRefusal`, the same check as clicking the service topic), so every vanilla gate applies: guild membership and rank, expulsion, disposition, bounty and quest state. A refusing NPC plays out vanilla's refusal line instead, and no window can be opened, whether the player asked or the NPC offered.
+- **NPC offers:** the after-reply check also catches the NPC offering a service, in the same request as the item check. It only runs when the reply mentions items or service words.
+- **Live test:** 30 of 32 player lines and NPC replies were classified right (`tests/llm/live_actions.sh`). The two misses are borderline: "Where can I buy armor around here?" to a trader offers Barter, and "Who taught you to fight like that?" counts as flattery.
 
 ## Phase 2.5: the bundled server
 

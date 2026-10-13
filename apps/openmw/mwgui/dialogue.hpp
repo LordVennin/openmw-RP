@@ -176,6 +176,9 @@ namespace MWGui
         /// An empty list removes them.
         void setLuaChoices(std::vector<std::pair<std::string, std::string>> choices);
 
+        /// While a Lua script is busy (an NPC's reply is being written), Goodbye and Escape can't close the window.
+        void setLuaBusy(bool busy);
+
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
 
@@ -224,6 +227,7 @@ namespace MWGui
         std::vector<std::pair<std::string, std::string>> mLuaChoices;
         std::vector<BookTypesetter::Style*> mChoiceStyles;
         bool mGoodbye;
+        bool mLuaBusy = false;
 
         std::vector<std::unique_ptr<Link>> mLinks;
         std::unordered_map<std::string, std::unique_ptr<Link>> mTopicLinks;

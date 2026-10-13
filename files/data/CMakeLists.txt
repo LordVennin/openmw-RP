@@ -126,7 +126,12 @@ set(BUILTIN_DATA_FILES
     scripts/llm/json.lua
 
     # AI dialogue (openmw.llm)
-    scripts/llm/actions.lua
+    scripts/llm/actions/check.lua
+    scripts/llm/actions/follow.lua
+    scripts/llm/actions/give.lua
+    scripts/llm/actions/persuade.lua
+    scripts/llm/actions/registry.lua
+    scripts/llm/actions/service.lua
     scripts/llm/budget.lua
     scripts/llm/cards.lua
     scripts/llm/followers.lua

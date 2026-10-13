@@ -7,17 +7,25 @@
 #include <string_view>
 #include <tuple>
 
+#include <components/esm3/loaddial.hpp>
+#include <components/interpreter/defines.hpp>
 #include <components/lua/asyncpackage.hpp>
 #include <components/lua/luastate.hpp>
 #include <components/settings/values.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwdialogue/filter.hpp"
+#include "../mwmechanics/creaturestats.hpp"
+#include "../mwscript/interpretercontext.hpp"
+#include "../mwworld/class.hpp"
+#include "../mwworld/esmstore.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwgui/dialogue.hpp"
 #include "../mwgui/mode.hpp"
 
 #include "context.hpp"
 #include "luamanagerimp.hpp"
+#include "object.hpp"
 
 namespace MWLua
 {
@@ -119,6 +127,43 @@ namespace MWLua
                         windowManager->getDialogueWindow()->setLuaChoices(std::move(choices));
                 },
                 "setDialogueChoicesAction");
+        };
+
+        // Vanilla's service refusal for an actor: what DialogueManager::checkServiceRefused would answer when the player
+        // asks for `service` (MWBase::DialogueManager::ServiceType: 1 barter, 2 repair, 3 spells, 4 training, 5 travel,
+        // 6 spellmaking, 7 enchanting). Like vanilla, the refusals for any service are checked first. Returns the
+        // refusal line, or nil if the actor would provide the service. Doesn't run the line's result script.
+        api["serviceRefusal"] = [](const Object& actor, int service) -> sol::optional<std::string> {
+            const MWWorld::Ptr ptr = actor.ptr();
+            if (!ptr.getClass().isActor())
+                return sol::nullopt;
+            const ESM::Dialogue* dialogue
+                = MWBase::Environment::get().getESMStore()->get<ESM::Dialogue>().search(
+                    ESM::RefId::stringRefId("Service Refusal"));
+            if (!dialogue)
+                return sol::nullopt;
+            const bool talkedTo = ptr.getClass().getCreatureStats(ptr).hasTalkedToPlayer();
+            for (int choice : { -1, service })
+            {
+                MWDialogue::Filter filter(ptr, choice, talkedTo);
+                const std::vector<MWDialogue::Filter::Response> infos = filter.list(*dialogue, false, false, true);
+                if (!infos.empty())
+                {
+                    MWScript::InterpreterContext interpreterContext(&ptr.getRefData().getLocals(), ptr);
+                    return Interpreter::fixDefinesDialog(infos[0].second->mResponse, interpreterContext);
+                }
+            }
+            return sol::nullopt;
+        };
+
+        api["setDialogueBusy"] = [context](bool busy) {
+            context.mLuaManager->addAction(
+                [busy] {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (windowManager->containsMode(MWGui::GM_Dialogue))
+                        windowManager->getDialogueWindow()->setLuaBusy(busy);
+                },
+                "setDialogueBusyAction");
         };
 
         api["addDialogueResponse"] = [context](std::string text, const sol::optional<sol::table>& options) {

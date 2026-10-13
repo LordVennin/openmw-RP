@@ -161,6 +161,24 @@ local function conditionPasses(condition, ctx)
         value = (ctx.npcRecord.isMale == ctx.playerRecord.isMale) and 1 or 0
     elseif t == T.PcCrimeLevel then
         value = types.Player.getCrimeLevel(ctx.player)
+    elseif t == T.PcReputation then
+        value = types.NPC.stats.reputation(ctx.player).current
+    elseif t == T.Reputation then
+        value = types.NPC.stats.reputation(ctx.npc).current
+    elseif t == T.Level then
+        value = types.Actor.stats.level(ctx.npc).current
+    elseif t == T.PcExpelled or t == T.SameFaction or t == T.FactionRankDifference then
+        local faction = ctx.npcRecord.primaryFaction
+        if not faction or faction == '' then
+            value = 0
+        elseif t == T.PcExpelled then
+            value = types.NPC.isExpelled(ctx.player, faction) and 1 or 0
+        elseif t == T.SameFaction then
+            value = inFaction(ctx.player, faction:lower()) and 1 or 0
+        else
+            -- Both ranks are 1-based here (0 for the player outside the faction), so the difference matches vanilla's
+            value = types.NPC.getFactionRank(ctx.player, faction) - ctx.npcRecord.primaryFactionRank
+        end
     else
         return true
     end
@@ -180,12 +198,32 @@ function M.infoPasses(info, ctx)
     if info.filterActorGender and (info.filterActorGender == 'male') ~= ctx.npcRecord.isMale then
         return false
     end
-    if info.filterActorFaction and info.filterActorFaction ~= '' and not inFaction(ctx.npc, info.filterActorFaction:lower()) then
-        return false
+    -- Faction and rank filters, as MWDialogue::Filter::testActor and testPlayer: the speaker's primary faction and
+    -- rank, the player's membership and rank (ranks are 1-based here, 0 when not a member)
+    local npcFaction = lower(ctx.npcRecord.primaryFaction) or ''
+    if info.filterActorFaction == '' then
+        if npcFaction ~= '' then
+            return false -- a line for speakers without a faction
+        end
+    elseif info.filterActorFaction then
+        if npcFaction ~= info.filterActorFaction:lower() then
+            return false
+        end
     end
-    if info.filterPlayerFaction and info.filterPlayerFaction ~= ''
-        and not inFaction(ctx.player, info.filterPlayerFaction:lower()) then
-        return false
+    if info.filterActorFactionRank and info.filterActorFaction ~= '' then
+        if npcFaction == '' or types.NPC.getFactionRank(ctx.npc, npcFaction) < info.filterActorFactionRank then
+            return false
+        end
+    end
+    local playerFaction = info.filterPlayerFaction and info.filterPlayerFaction:lower()
+    if not playerFaction and info.filterPlayerFactionRank then
+        playerFaction = npcFaction -- a player rank without a faction means the speaker's faction
+    end
+    if playerFaction then
+        local rank = playerFaction ~= '' and types.NPC.getFactionRank(ctx.player, playerFaction) or 0
+        if rank == 0 or rank < (info.filterPlayerFactionRank or 1) then
+            return false
+        end
     end
     if info.filterPlayerCell then
         local cellName = lower(ctx.player.cell.name) or ''

@@ -11,20 +11,19 @@ local storage = require('openmw.storage')
 local types = require('openmw.types')
 local ui = require('openmw.ui')
 
-local actions = require('scripts.llm.actions')
 local budget = require('scripts.llm.budget')
 local cards = require('scripts.llm.cards')
-local followers = require('scripts.llm.followers')
+local check = require('scripts.llm.actions.check')
 local generated = require('scripts.llm.generated')
-local handover = require('scripts.llm.handover')
 local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
 local lorebook = require('scripts.llm.lorebook')
 local memory = require('scripts.llm.memory')
-local persuasion = require('scripts.llm.persuasion')
 local prompt = require('scripts.llm.prompt')
+local registry = require('scripts.llm.actions.registry')
 local sanitize = require('scripts.llm.sanitize')
 local scene = require('scripts.llm.scene')
+local service = require('scripts.llm.actions.service')
 local templates = require('scripts.llm.templates')
 
 local l10n = core.l10n('LLMDialogue')
@@ -42,8 +41,9 @@ local MAX_SAVED_EVENTS = 5
 local histories = {}
 -- The NPC whose dialogue window is open, or nil
 local dialogueNpc = nil
--- The turn in progress: { id, stage = 'reply'|'action'|'transfer', npc, npcName, userText, limits }, or nil.
--- The text input stays disabled until the whole turn (reply, then an optional item exchange) is finished.
+-- The turn in progress, or nil: { id, stage (see below), npc, npcName, userText, limits, eventsBefore, happened,
+-- afterChoices, choiceHandler, onApplied, endReason, settled, serviceUsed }.
+-- The text input stays disabled until the whole turn (checks, reply, choices) is finished.
 local pending = nil
 -- npc id -> the NPC's mwscript variables (lower-case names), as last reported by the global script
 local localsByNpc = {}
@@ -206,17 +206,27 @@ local function recallConversation(npc)
 end
 
 -- A turn runs through these stages, with the text input disabled until it is finished:
---   'intent'         what does the player do in their line: give an item, persuade (admire, intimidate, taunt),
---                    or ask the NPC to follow, wait or leave? Persuasion and followers are resolved here
---   'confirmOffer'   if so, the player confirms with a dialogue choice ("Give X" / "Keep it")
---   'pretransfer'    the handover is applied first (with vanilla quest effects and rewards)...
---   'reply'          ...so the NPC's reply can react to it
---   'action'         if the exchange mentions items: did the NPC hand something over, or the player after all?
---   'confirmAction'  the player confirms ("Give X" / "Keep it", or "Accept X" / "Refuse")
---   'transfer'       applying that
--- Nothing changes hands without the player's click, so a wrong guess by the model costs nothing.
+--   'intent'         what does the player do in their line? One check, built from the available actions
+--                    (scripts/llm/actions/registry.lua): give an item, persuade, ask to follow, ask for a service...
+--   'confirmBefore'  an action that needs the player's click before the reply (giving an item: "Give X" / "Keep it")
+--   'applying'       waiting for the global script to apply something (an item moving, with quest effects)
+--   'reply'          the NPC's reply, told what just happened
+--   'leave'          while the NPC is upset: does their reply end the conversation?
+--   'proposal'       does the NPC offer something in their reply (an item, a service)?
+--   'confirmAfter'   the player's choice after the reply ("Take X along", "Barter", "Accept X"...)
+--   'ended'          the NPC ended the conversation: only Goodbye is left
+-- Nothing changes without the player's click, so a wrong guess by the model costs nothing. While the turn waits for
+-- the server or the global script, the dialogue window can't be closed, so the reply is never lost.
+local SERVER_STAGES = { intent = true, reply = true, leave = true, proposal = true }
+local BUSY_STAGES = { intent = true, reply = true, leave = true, proposal = true, applying = true }
+
 local function isWaitingForServer(stage)
-    return stage == 'intent' or stage == 'reply' or stage == 'action' or stage == 'leave'
+    return SERVER_STAGES[stage] == true
+end
+
+local function setStage(turn, stage)
+    turn.stage = stage
+    llm.setDialogueBusy(BUSY_STAGES[stage] == true)
 end
 
 local function cancelPending()
@@ -224,16 +234,18 @@ local function cancelPending()
         if isWaitingForServer(pending.stage) then
             llm.cancel(pending.id)
         end
-        if pending.stage == 'confirmOffer' or pending.stage == 'confirmAction' or pending.stage == 'confirmFollow' then
+        if pending.stage == 'confirmBefore' or pending.stage == 'confirmAfter' then
             llm.setDialogueChoices({})
         end
         pending = nil
     end
+    llm.setDialogueBusy(false)
 end
 
 -- Ends the turn in progress and gives the text input back to the player
 local function finishTurn()
     pending = nil
+    llm.setDialogueBusy(false)
     if dialogueNpc then
         setInput(true)
     end
@@ -255,165 +267,11 @@ local function decodeAnswer(response, label)
     return nil
 end
 
-local function applyTransfer(turn, transfer, stage)
-    local effects = nil
-    if transfer.transfer == 'player_to_npc' then
-        local ok, found = pcall(handover.find, turn.npc, self.object, transfer.item, localsByNpc[turn.npc.id],
-            transfer.count)
-        effects = ok and found or nil
-        if not ok then
-            print('LLM handover lookup: ' .. tostring(found))
-        end
-    end
-    turn.stage = stage
-    turn.transfer = transfer
-    turn.effects = effects
-    core.sendGlobalEvent('LLMApplyTransfer', {
-        player = self.object,
-        npc = turn.npc,
-        transfer = transfer.transfer,
-        item = transfer.item,
-        count = transfer.count,
-        effects = effects,
-    })
-end
-
-local function itemLabel(name, count)
-    return count > 1 and (count .. ' ' .. name) or name
-end
-
-local numberWords = { 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'twenty', 'thirty',
-    'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand' }
-
--- Whether the player named an amount themselves ("20 gold", "fifty drakes")
-local function namesAmount(text)
-    local lower = text:lower()
-    if lower:find('%d') then
-        return true
-    end
-    for _, word in ipairs(numberWords) do
-        if lower:find('%f[%a]' .. word .. '%f[%A]') then
-            return true
-        end
-    end
-    return false
-end
-
--- When the player gives an NPC something a vanilla quest line asks for, use the quest's amount (e.g. Vodunius
--- Nuccius's 100 drakes) instead of the model's guess, as long as the player has that many and didn't name an
--- amount of their own.
-local function useQuestAmount(turn, transfer, candidates)
-    if transfer.transfer ~= 'player_to_npc' or namesAmount(turn.userText) then
-        return
-    end
-    local ok, required = pcall(handover.requiredCount, turn.npc, self.object, transfer.item, localsByNpc[turn.npc.id])
-    if not ok or not required then
-        return
-    end
-    for _, c in ipairs(candidates) do
-        if c.id == transfer.item and c.playerCount >= required then
-            transfer.count = required
-            return
-        end
-    end
-end
-
-local function gmstValues()
-    local values = {}
-    for key, default in pairs(persuasion.DEFAULT_GMST) do
-        local ok, value = pcall(core.getGMST, key)
-        values[key] = (ok and type(value) == 'number') and value or default
-    end
-    return values
-end
-
-local function persuasionStats(actor)
-    local fatigue = types.Actor.stats.dynamic.fatigue(actor)
-    return {
-        speechcraft = types.NPC.stats.skills.speechcraft(actor).modified,
-        personality = types.Actor.stats.attributes.personality(actor).modified,
-        luck = types.Actor.stats.attributes.luck(actor).modified,
-        reputation = types.NPC.stats.reputation(actor).current,
-        level = types.Actor.stats.level(actor).current,
-        fatigueCurrent = fatigue.current,
-        fatigueMax = fatigue.base,
-    }
-end
-
 local function conversationFor(npc)
     if not conversation or conversation.npc ~= npc then
         conversation = { npc = npc, attempts = {}, permanent = 0 }
     end
     return conversation
-end
-
--- Plain-words outcome lines for the model; no numbers
-local persuasionOutcomes = {
-    admire = {
-        [true] = "The stranger's words flattered %s, and it worked: %s warms to the stranger.",
-        [false] = "The stranger tried to flatter %s, but it fell flat: %s is unimpressed.",
-    },
-    intimidate = {
-        [true] = "The stranger's threat worked: %s is afraid of the stranger and will do as told, but resents it.",
-        [false] = "The stranger tried to intimidate %s, but it failed: %s is not scared, only annoyed.",
-    },
-    taunt = {
-        [true] = "The stranger's insult struck home: %s is angry and hurt.",
-        [false] = "%s shrugs off the stranger's insult, but thinks less of the stranger.",
-    },
-}
-
--- Vanilla persuasion for an admire/intimidate/taunt line; returns a line for the [What just happened] note
-local function persuade(turn, kind)
-    local npc = turn.npc
-    local convo = conversationFor(npc)
-    convo.attempts[kind] = (convo.attempts[kind] or 0) + 1
-    if convo.attempts[kind] > persuasion.MAX_ATTEMPTS_PER_KIND then
-        return string.format('The stranger keeps repeating the same approach; %s is tired of it and it has no effect.',
-            turn.npcName)
-    end
-    local disposition = types.NPC.getDisposition(npc, self.object)
-    local gmst = gmstValues()
-    local result = persuasion.attempt(kind, persuasionStats(self.object), persuasionStats(npc), disposition,
-        math.random(0, 99), gmst)
-    if not convo.originalBase then
-        convo.originalBase = types.NPC.getBaseDisposition(npc, self.object)
-    end
-    convo.permanent = convo.permanent + result.perm
-    if result.temp ~= 0 then
-        core.sendGlobalEvent('LLMModDisposition', { npc = npc, player = self.object, delta = result.temp })
-    end
-    if kind == persuasion.TYPES.intimidate and result.success then
-        convo.coerced = true
-    end
-    if kind == persuasion.TYPES.taunt or (kind == persuasion.TYPES.intimidate and not result.success) then
-        convo.upset = true
-    end
-    if result.fight ~= 0 or result.flee ~= 0 then
-        core.sendGlobalEvent('LLMModAI', { npc = npc, fight = result.fight, flee = result.flee })
-    end
-    local useTypes = I.SkillProgression.SKILL_USE_TYPES
-    I.SkillProgression.skillUsed('speechcraft',
-        { useType = result.success and useTypes.Speechcraft_Success or useTypes.Speechcraft_Fail })
-    local line = string.format(persuasionOutcomes[kind][result.success], turn.npcName, turn.npcName)
-
-    -- How close is the NPC to violence? The engine's own rule, with this attempt's changes included
-    local dispositionAfter = math.min(disposition + result.temp, disposition + result.perm)
-    local dx, dy = npc.position.x - self.position.x, npc.position.y - self.position.y
-    local fight = types.Actor.stats.ai.fight(npc).modified + result.fight
-    local term = persuasion.fightTerm(fight, math.sqrt(dx * dx + dy * dy), dispositionAfter, gmst)
-    if term >= persuasion.ATTACK_THRESHOLD then
-        turn.endReason = 'attack'
-        line = line .. string.format(' %s loses their temper and attacks the stranger.', turn.npcName)
-    elseif term >= persuasion.THREATENING_THRESHOLD then
-        line = line .. string.format(' %s is barely holding back from violence and threatens the stranger.', turn.npcName)
-    elseif dispositionAfter <= 20 then
-        turn.endReason = 'fedUp'
-        line = line .. string.format(' %s has had enough of the stranger and ends the conversation.', turn.npcName)
-    end
-    print(string.format('LLM persuasion: %s %s -> %s, temporary %+d, permanent %+d, fight %+d, fight term %d', kind,
-        npc.recordId, result.success and 'success' or 'failure', result.temp, result.perm, result.fight, term))
-    return line
 end
 
 -- At the end of a conversation, like vanilla: only the permanent part of persuasion remains
@@ -428,16 +286,6 @@ local function endConversation()
     conversation = nil
 end
 
-local followReasons = {
-    afraid = '%s agrees to follow the stranger, but only out of fear, and resents it.',
-    rank = '%s agrees to follow, because the stranger outranks them.',
-    likes = '%s agrees to come along: they like the stranger.',
-    quest = "%s can't come along: they have their own business to attend to right now.",
-    essential = "%s can't come along: they have their own business to attend to right now.",
-    job = '%s likes the stranger, but refuses: they have work to do here and cannot leave their post.',
-    dislikes = "%s refuses to follow: they don't like or trust the stranger enough.",
-}
-
 local function followerState(npc)
     local entry = followerStates[npc.id]
     return entry and entry.state or nil
@@ -451,64 +299,97 @@ local function setFollowerState(npc, state, reason)
     end
 end
 
--- Shows "Give X" / "Keep it" (or "Accept X" / "Refuse") as dialogue choices and waits for the click
-local function askToConfirm(turn, transfer, stage)
-    turn.stage = stage
-    turn.proposed = transfer
-    local item = itemLabel(transfer.name or transfer.item, transfer.count)
-    local choices
-    if transfer.transfer == 'player_to_npc' then
-        choices = { { id = 'yes', label = l10n('giveChoice', { item = item }) }, { id = 'no', label = l10n('keepChoice') } }
-    else
-        choices = { { id = 'yes', label = l10n('acceptChoice', { item = item }) }, { id = 'no', label = l10n('refuseChoice') } }
-    end
+local function showChoices(turn, stage, choices)
+    setStage(turn, stage)
     llm.setDialogueChoices(choices)
     setInput(false, l10n('chooseHint'))
 end
 
+-- After the reply: shows the choices an action left for the player, or ends the turn
+local function showAfterChoices(turn)
+    local choices = turn.afterChoices
+    if choices then
+        turn.afterChoices = nil
+        showChoices(turn, 'confirmAfter', choices)
+    else
+        finishTurn()
+    end
+end
+
 local startReply
 
--- The player clicked one of the confirmation choices
+-- What actions can do in game (scripts/llm/actions/*.lua)
+local game = {
+    player = self.object,
+    l10n = l10n,
+    conversation = conversationFor,
+    setFollowerState = setFollowerState,
+    finishTurn = function()
+        finishTurn()
+    end,
+}
+-- A line for the [What just happened] note of this turn's reply
+function game.happened(turn, line)
+    turn.happened = turn.happened or {}
+    table.insert(turn.happened, line)
+end
+-- Something the NPC remembers from now on ([Recent events])
+function game.historyEvent(npc, text)
+    table.insert(historyFor(npc).events, text)
+end
+function game.notice(key, args)
+    ui.showMessage(l10n(key, args), { showInDialogue = true })
+end
+function game.sendGlobal(name, payload)
+    core.sendGlobalEvent(name, payload)
+end
+function game.locals(npc)
+    return localsByNpc[npc.id]
+end
+-- Vanilla dialogue text made ready for the prompt
+function game.expand(text, npc)
+    return sanitize.toDrawable(expandVanillaText(text, npc))
+end
+-- Opens a service window (Barter, Training...) over the dialogue, as vanilla's service topics do
+function game.openWindow(mode, npc)
+    I.UI.addMode(mode, { target = npc })
+end
+-- Offers the player dialogue choices: 'before' the reply (the turn waits for the click), or 'after' it.
+-- handler(choiceId) must end the turn (game.finishTurn) or, before the reply, go on to it (game.continueTurn).
+function game.choices(turn, when, choices, handler)
+    turn.choiceHandler = handler
+    if when == 'before' then
+        showChoices(turn, 'confirmBefore', choices)
+    else
+        turn.afterChoices = choices
+    end
+end
+-- After a 'before' choice: goes on to the NPC's reply
+function game.continueTurn(turn)
+    setInput(false, l10n('thinking', { name = turn.npcName }))
+    startReply(turn)
+end
+-- Sends an event to the global script and waits for its result (the global script answers with
+-- LLMTransferApplied), then calls done(result)
+function game.globalRequest(turn, name, payload, done)
+    setStage(turn, 'applying')
+    turn.onApplied = done
+    core.sendGlobalEvent(name, payload)
+end
+
+-- The player clicked one of the dialogue choices
 local function onChoice(choiceId)
     local turn = pending
     if turn and turn.stage == 'ended' and choiceId == 'goodbye' then
         I.UI.removeMode('Dialogue')
         return
     end
-    if not turn or (turn.stage ~= 'confirmOffer' and turn.stage ~= 'confirmAction' and turn.stage ~= 'confirmFollow') then
+    if not turn or (turn.stage ~= 'confirmBefore' and turn.stage ~= 'confirmAfter') or not turn.choiceHandler then
         return
     end
-    if turn.stage == 'confirmFollow' then
-        -- The NPC already agreed in their reply; the player now decides whether to take them along
-        local decision = turn.followDecision
-        turn.followDecision = nil
-        if choiceId == 'yes' then
-            core.sendGlobalEvent('LLMFollow', { npc = turn.npc, player = self.object, reason = decision.reason })
-            setFollowerState(turn.npc, 'following', decision.reason)
-            ui.showMessage(l10n('followNotice', { name = turn.npcName }), { showInDialogue = true })
-            table.insert(historyFor(turn.npc).events, string.format('%s started following the stranger.', turn.npcName))
-        else
-            table.insert(historyFor(turn.npc).events,
-                string.format('%s offered to come along, but the stranger decided against it.', turn.npcName))
-        end
-        finishTurn()
-        return
-    end
-    local transfer = turn.proposed
-    turn.proposed = nil
-    if turn.stage == 'confirmOffer' then
-        if choiceId == 'yes' then
-            applyTransfer(turn, transfer, 'pretransfer')
-        else
-            startReply(turn)
-        end
-    else
-        if choiceId == 'yes' then
-            applyTransfer(turn, transfer, 'transfer')
-        else
-            finishTurn()
-        end
-    end
+    local handler = turn.choiceHandler
+    turn.choiceHandler = nil
+    handler(choiceId)
 end
 
 -- Runs a handler; on a Lua error, logs it and ends the turn so the dialogue never stays locked
@@ -528,185 +409,110 @@ local function guarded(name, fn)
 end
 
 local function sendClassification(turn, body, schemaText, stage, callback)
-    local id = llm.request(actions.encodeRequest(json, body, schemaText), async:callback(guarded(stage .. ' check', callback)),
+    local id = llm.request(check.encodeRequest(json, body, schemaText), async:callback(guarded(stage .. ' check', callback)),
         { endpoint = 'completion', timeout = ACTION_TIMEOUT })
     if not id then
         return false
     end
     turn.id = id
-    turn.stage = stage
+    setStage(turn, stage)
     return true
 end
 
-local function onActionReply(id, candidates, reply, response)
-    if not pending or pending.id ~= id or pending.stage ~= 'action' then
-        return
+local function npcLastLine(history)
+    for i = #history.turns, 1, -1 do
+        if history.turns[i].role == 'model' then
+            return history.turns[i].text
+        end
     end
-    local transfer = actions.parse(decodeAnswer(response, 'action check'), candidates, actions.NPC_GIVES, reply)
-    if transfer then
-        useQuestAmount(pending, transfer, candidates)
-        askToConfirm(pending, transfer, 'confirmAction')
-    else
-        finishTurn()
-    end
+    return history.greeting
 end
 
--- After a reply: if an item could have changed hands, ask the model to classify the exchange.
--- @return true if a check was started (the turn continues), false if the turn is over
-local function startActionCheck(turn, reply)
-    -- Only what the NPC carries: the player giving was already decided before the reply
-    local candidates = actions.findCandidates({ turn.userText, reply }, {}, inventoryItems(turn.npc),
-        turn.limits.actionCandidates)
-    if #candidates == 0 then
+-- What the action checks know about the turn. Intents look at the player's line and the items they carry;
+-- proposals at the NPC's reply and the items the NPC carries.
+local function checkContext(turn, kind, reply)
+    local ctx = {
+        npcName = turn.npcName,
+        playerName = playerName(),
+        userLine = turn.userText,
+        npcLastLine = npcLastLine(historyFor(turn.npc)),
+        reply = reply,
+        services = service.forNpc(turn.npc),
+        followerState = followerState(turn.npc),
+        serviceUsed = turn.serviceUsed,
+    }
+    if kind == registry.INTENT then
+        ctx.candidates = check.findCandidates({ turn.userText }, inventoryItems(self.object), {},
+            turn.limits.actionCandidates)
+    else
+        ctx.candidates = check.findCandidates({ turn.userText, reply }, {}, inventoryItems(turn.npc),
+            turn.limits.actionCandidates)
+    end
+    return ctx
+end
+
+-- Runs an action check; onResult(turn, chosen) gets { entry, params } or nil
+-- @return true if a check was started, false if no action is possible
+local function startCheck(turn, kind, reply, onResult)
+    local ctx = checkContext(turn, kind, reply)
+    local entries = registry.entries(kind, ctx)
+    if #entries == 0 then
         return false
     end
-    local userName = playerName()
-    local exchange = {
-        { speaker = userName, text = turn.userText },
-        { speaker = turn.npcName, text = reply },
-    }
     local body = {
-        prompt = actions.prompt(template(), turn.npcName, userName, exchange, candidates),
+        prompt = registry.prompt(kind, template(), ctx, entries),
         n_predict = 128,
         temperature = 0,
         stop = template().stop,
     }
+    local stage = kind == registry.INTENT and 'intent' or 'proposal'
     local id
-    local started = sendClassification(turn, body, actions.schemaJson(candidates), 'action', function(response)
-        onActionReply(id, candidates, reply, response)
+    local started = sendClassification(turn, body, registry.schemaJson(kind, ctx, entries), stage, function(response)
+        if not pending or pending.id ~= id or pending.stage ~= stage then
+            return
+        end
+        local chosen = registry.parse(kind, decodeAnswer(response, stage .. ' check'), ctx, entries)
+        if chosen then
+            print('LLM ' .. stage .. ': ' .. chosen.entry.name)
+        end
+        onResult(pending, chosen)
     end)
     id = turn.id
     return started
 end
 
-local function addHappened(turn, line)
-    turn.happened = turn.happened or {}
-    table.insert(turn.happened, line)
+-- Runs an action's effect; true if it took over the turn (it waits for a choice before the reply)
+local function runAction(turn, chosen)
+    local ok, result = pcall(chosen.entry.run, game, turn, chosen.params)
+    if not ok then
+        print('LLM action ' .. chosen.entry.name .. ': ' .. tostring(result))
+        return false
+    end
+    return result == 'paused'
 end
 
--- Handles what the player did in their line, before the NPC replies
-local function onIntentReply(id, candidates, response)
-    if not pending or pending.id ~= id or pending.stage ~= 'intent' then
+-- Before the reply: what does the player do in this line?
+local function onIntent(turn, chosen)
+    if chosen and runAction(turn, chosen) then
         return
-    end
-    local turn = pending
-    local result = actions.parseIntent(decodeAnswer(response, 'intent check'), candidates, turn.userText)
-    local intent = result and result.intent or 'none'
-
-    if intent == 'give' then
-        useQuestAmount(turn, result.transfer, candidates)
-        askToConfirm(turn, result.transfer, 'confirmOffer')
-        return
-    elseif intent == 'admire' or intent == 'intimidate' or intent == 'taunt' then
-        local ok, line = pcall(persuade, turn, intent)
-        if ok then
-            addHappened(turn, line)
-        else
-            print('LLM persuasion: ' .. tostring(line))
-        end
-    elseif intent == 'follow' then
-        if followerState(turn.npc) == 'following' then
-            addHappened(turn, string.format('%s is already following the stranger.', turn.npcName))
-        else
-            local convo = conversationFor(turn.npc)
-            local ok, decision = pcall(followers.decideFor, turn.npc, self.object, convo.coerced)
-            if not ok then
-                print('LLM follow decision: ' .. tostring(decision))
-            elseif decision.agrees then
-                -- The reply comes first, so the player hears the NPC agree; the choice follows it
-                turn.followDecision = decision
-                addHappened(turn, string.format(followReasons[decision.reason], turn.npcName))
-            else
-                addHappened(turn, string.format(followReasons[decision.reason], turn.npcName))
-            end
-        end
-    elseif intent == 'wait' then
-        if followerState(turn.npc) == 'following' then
-            core.sendGlobalEvent('LLMWait', { npc = turn.npc, player = self.object })
-            setFollowerState(turn.npc, 'waiting')
-            ui.showMessage(l10n('waitNotice', { name = turn.npcName }), { showInDialogue = true })
-            addHappened(turn, string.format('%s stops and will wait here for the stranger.', turn.npcName))
-        else
-            addHappened(turn, string.format("%s isn't travelling with the stranger.", turn.npcName))
-        end
-    elseif intent == 'dismiss' then
-        local state = followerState(turn.npc)
-        if state == 'following' or state == 'waiting' then
-            core.sendGlobalEvent('LLMDismiss', { npc = turn.npc, player = self.object })
-            setFollowerState(turn.npc, nil)
-            ui.showMessage(l10n('dismissNotice', { name = turn.npcName }), { showInDialogue = true })
-            addHappened(turn, string.format('%s stops travelling with the stranger and will head home.', turn.npcName))
-            table.insert(historyFor(turn.npc).events, string.format('%s stopped following the stranger.', turn.npcName))
-        end
     end
     startReply(turn)
 end
 
--- Before the reply: what does the player do in this line (give, persuade, follow, ...)?
--- @return true if the check was started
-local function startIntentCheck(turn)
-    local candidates = actions.findCandidates({ turn.userText }, inventoryItems(self.object), {},
-        turn.limits.actionCandidates)
-    local history = historyFor(turn.npc)
-    local npcLastLine = history.greeting
-    for i = #history.turns, 1, -1 do
-        if history.turns[i].role == 'model' then
-            npcLastLine = history.turns[i].text
-            break
-        end
+-- After the reply: does the NPC offer something the player can take up?
+local function onProposal(turn, chosen)
+    if chosen then
+        runAction(turn, chosen)
     end
-    local body = {
-        prompt = actions.intentPrompt(template(), turn.npcName, playerName(), turn.userText, candidates, npcLastLine),
-        n_predict = 128,
-        temperature = 0,
-        stop = template().stop,
-    }
-    local id
-    local started = sendClassification(turn, body, actions.intentSchemaJson(candidates), 'intent', function(response)
-        onIntentReply(id, candidates, response)
-    end)
-    id = turn.id
-    return started
+    showAfterChoices(turn)
 end
 
-local function onTransferApplied(result)
-    if not pending or (pending.stage ~= 'transfer' and pending.stage ~= 'pretransfer') then
-        return
+local function startProposalCheck(turn, reply)
+    local ok, started = pcall(startCheck, turn, registry.PROPOSAL, reply, onProposal)
+    if not ok then
+        print('LLM proposal check: ' .. tostring(started))
     end
-    local turn = pending
-    if result.ok then
-        local item = itemLabel(result.name, result.count)
-        local notice = result.transfer == 'player_to_npc' and 'itemRemoved' or 'itemAdded'
-        ui.showMessage(l10n(notice, { item = item }), { showInDialogue = true })
-        -- No journal notice here: the engine shows "Your journal has been updated" itself when an entry is added
-        local rewards = {}
-        for _, reward in ipairs(result.applied and result.applied.rewards or {}) do
-            local label = itemLabel(reward.name, reward.count)
-            rewards[#rewards + 1] = label
-            ui.showMessage(l10n('itemAdded', { item = label }), { showInDialogue = true })
-        end
-        local event
-        if result.transfer == 'player_to_npc' then
-            event = string.format('The stranger gave %s %s.', turn.npcName, item)
-        else
-            event = string.format('%s gave the stranger %s.', turn.npcName, item)
-        end
-        if turn.effects and turn.effects.note then
-            event = turn.effects.note
-        end
-        if #rewards > 0 then
-            event = event .. string.format(' %s rewarded the stranger with %s.', turn.npcName, table.concat(rewards, ', '))
-        end
-        table.insert(historyFor(turn.npc).events, event)
-        if turn.stage == 'pretransfer' then
-            turn.justHappened = { item = item, effects = turn.effects, rewards = rewards }
-        end
-    else
-        print('LLM transfer failed: ' .. tostring(result.error))
-    end
-    if turn.stage == 'pretransfer' then
-        startReply(turn)
-    else
+    if not (ok and started) then
         finishTurn()
     end
 end
@@ -721,7 +527,7 @@ local REFUSAL_HOURS = {
 -- The NPC ends the AI conversation: notice, a single Goodbye choice, and they refuse to talk for a while
 local function endChat(turn, reason)
     chatEnded = true
-    turn.stage = 'ended'
+    setStage(turn, 'ended')
     ui.showMessage(l10n('endsConversation', { name = turn.npcName }), { showInDialogue = true })
     llm.setDialogueInput({ visible = false })
     llm.setDialogueChoices({ { id = 'goodbye', label = l10n('goodbyeChoice') } })
@@ -746,26 +552,23 @@ local function onLeaveReply(id, reply, response)
     end
     local turn = pending
     local answer = decodeAnswer(response, 'leave check')
-    if answer and actions.evidenceFound(answer.evidence, reply) then
+    if answer and check.evidenceFound(answer.evidence, reply) then
         endChat(turn, 'leaves')
         return
     end
-    local ok, started = pcall(startActionCheck, turn, reply)
-    if not (ok and started) then
-        finishTurn()
-    end
+    startProposalCheck(turn, reply)
 end
 
 -- While the NPC is upset: does their reply end the conversation?
 local function startLeaveCheck(turn, reply)
     local body = {
-        prompt = actions.leavePrompt(template(), turn.npcName, playerName(), reply),
+        prompt = check.leavePrompt(template(), turn.npcName, playerName(), reply),
         n_predict = 96,
         temperature = 0,
         stop = template().stop,
     }
     local id
-    local started = sendClassification(turn, body, actions.LEAVE_SCHEMA_JSON, 'leave', function(response)
+    local started = sendClassification(turn, body, check.LEAVE_SCHEMA_JSON, 'leave', function(response)
         onLeaveReply(id, reply, response)
     end)
     id = turn.id
@@ -778,87 +581,62 @@ local function onReply(id, response)
     end
     local turn = pending
 
-    local continues = false
     if not response.ok then
         local errorText = response.error or ('HTTP ' .. tostring(response.status))
         ui.showMessage(l10n('serverError', { error = errorText }), { showInDialogue = true })
-    else
-        local ok, data = pcall(json.decode, response.body)
-        local content = ok and type(data) == 'table' and data.content or ''
-        local reply = sanitize.reply(content, {
-            specialTokens = template().specialTokens,
-            speakerName = turn.npcName,
-        })
-        if ok and data.stop_type == 'limit' then
-            reply = sanitize.trimIncomplete(reply)
-        end
-        if reply == '' then
-            reply = '*' .. turn.npcName .. ' says nothing.*'
-        end
-        local history = historyFor(turn.npc)
-        table.insert(history.turns, { role = 'user', text = turn.userText })
-        table.insert(history.turns, { role = 'model', text = reply })
-        llm.addDialogueResponse(reply)
-        if turn.endReason then
-            -- Decided before the reply (about to attack, or fed up): the reply played it out
-            endChat(turn, turn.endReason)
-            continues = true
-        elseif isUpset(turn) and actions.actionExit(reply) then
-            endChat(turn, 'leaves')
-            continues = true
-        elseif isUpset(turn) and not turn.followDecision and not turn.justHappened then
-            local okCheck, started = pcall(startLeaveCheck, turn, reply)
-            continues = okCheck and started
-            if not okCheck then
-                print('LLM leave check: ' .. tostring(started))
-            end
-        elseif turn.followDecision then
-            -- The NPC agreed to come along in this reply: now the player confirms
-            turn.stage = 'confirmFollow'
-            llm.setDialogueChoices({
-                { id = 'yes', label = l10n('followChoice', { name = turn.npcName }) },
-                { id = 'no', label = l10n('neverMindChoice') },
-            })
-            setInput(false, l10n('chooseHint'))
-            continues = true
-        -- A handover before the reply already settled this turn's exchange
-        elseif not turn.justHappened then
-            local okCheck, started = pcall(startActionCheck, turn, reply)
-            continues = okCheck and started
-            if not okCheck then
-                print('LLM action check: ' .. tostring(started))
-            end
-        end
-    end
-
-    if not continues then
         finishTurn()
+        return
+    end
+    local ok, data = pcall(json.decode, response.body)
+    local content = ok and type(data) == 'table' and data.content or ''
+    local reply = sanitize.reply(content, {
+        specialTokens = template().specialTokens,
+        speakerName = turn.npcName,
+    })
+    if ok and data.stop_type == 'limit' then
+        reply = sanitize.trimIncomplete(reply)
+    end
+    if reply == '' then
+        reply = '*' .. turn.npcName .. ' says nothing.*'
+    end
+    local history = historyFor(turn.npc)
+    table.insert(history.turns, { role = 'user', text = turn.userText })
+    table.insert(history.turns, { role = 'model', text = reply })
+    llm.addDialogueResponse(reply)
+
+    if turn.endReason then
+        -- Decided before the reply (about to attack, or fed up): the reply played it out
+        endChat(turn, turn.endReason)
+    elseif isUpset(turn) and check.actionExit(reply) then
+        endChat(turn, 'leaves')
+    elseif turn.afterChoices then
+        -- An action decided before the reply (the NPC agreed to come along, to trade...): now the player chooses
+        showAfterChoices(turn)
+    elseif turn.settled then
+        -- A handover before the reply already settled this turn's exchange
+        finishTurn()
+    elseif isUpset(turn) then
+        local okCheck, started = pcall(startLeaveCheck, turn, reply)
+        if not okCheck then
+            print('LLM leave check: ' .. tostring(started))
+        end
+        if not (okCheck and started) then
+            startProposalCheck(turn, reply)
+        end
+    else
+        startProposalCheck(turn, reply)
     end
 end
 
--- Tells the model about a handover that just happened, with vanilla's reaction and rewards, so the reply
--- plays it out instead of a generic thank-you
+-- Tells the model what happened in this turn before the reply (a handover with vanilla's reaction and rewards,
+-- persuasion, a follower decision...), so the reply plays it out
 local function justHappenedNote(turn)
-    local happened = turn.justHappened
-    if not happened then
-        if not turn.happened or #turn.happened == 0 then
-            return nil
-        end
-        local lines = { '[What just happened]' }
-        for _, line in ipairs(turn.happened) do
-            lines[#lines + 1] = line
-        end
-        lines[#lines + 1] = string.format('%s now reacts to this, in character and in their own words.', turn.npcName)
-        return table.concat(lines, '\n')
+    if not turn.happened or #turn.happened == 0 then
+        return nil
     end
-    local lines = { '[What just happened]', string.format('The stranger has just handed %s %s.', turn.npcName, happened.item) }
-    if happened.effects and happened.effects.text then
-        lines[#lines + 1] = string.format('In the original story, %s reacts like this: "%s"', turn.npcName,
-            sanitize.toDrawable(expandVanillaText(happened.effects.text, turn.npc)))
-    end
-    if #happened.rewards > 0 then
-        lines[#lines + 1] = string.format('%s has given the stranger a reward: %s.', turn.npcName,
-            table.concat(happened.rewards, ', '))
+    local lines = { '[What just happened]' }
+    for _, line in ipairs(turn.happened) do
+        lines[#lines + 1] = line
     end
     lines[#lines + 1] = string.format('%s now reacts to this, in character and in their own words.', turn.npcName)
     return table.concat(lines, '\n')
@@ -890,13 +668,7 @@ startReply = function(turn)
         notes[#notes + 1] = sceneNote
     end
     -- Vanilla topic answers for topics mentioned in the player's line or the NPC's last line
-    local lastNpcLine = history.greeting or ''
-    for i = #history.turns, 1, -1 do
-        if history.turns[i].role == 'model' then
-            lastNpcLine = history.turns[i].text
-            break
-        end
-    end
+    local lastNpcLine = npcLastLine(history) or ''
     local ok, knowledgeNote = pcall(knowledge.build, npc, self.object, { userText, lastNpcLine }, function(text)
         return sanitize.toDrawable(expandVanillaText(text, npc))
     end, limits, localsByNpc[npc.id])
@@ -916,9 +688,9 @@ startReply = function(turn)
     elseif not okLore then
         print('LLM lorebook: ' .. tostring(loreNote))
     end
-    -- Things that happened in this conversation, such as items changing hands (this turn's handover is
-    -- described separately below)
-    local eventCount = #history.events - (turn.justHappened and 1 or 0)
+    -- Things that happened in earlier turns, such as items changing hands (this turn's are described separately
+    -- below, in [What just happened])
+    local eventCount = math.min(#history.events, turn.eventsBefore or #history.events)
     if eventCount > 0 then
         local events = {}
         for i = math.max(1, eventCount - limits.recentEvents + 1), eventCount do
@@ -973,7 +745,7 @@ startReply = function(turn)
     end
     id = requestId
     turn.id = requestId
-    turn.stage = 'reply'
+    setStage(turn, 'reply')
 end
 
 local function sendLine(npc, rawText)
@@ -987,6 +759,7 @@ local function sendLine(npc, rawText)
         npcName = npcName,
         userText = userText,
         limits = budget.fromContextSize(llm.serverStatus().contextSize, generalSettings:get('replyTokens')),
+        eventsBefore = #historyFor(npc).events,
     }
     pending = turn
 
@@ -994,7 +767,7 @@ local function sendLine(npc, rawText)
     llm.addDialogueResponse('', { title = userText })
     setInput(false, l10n('thinking', { name = npcName }))
 
-    local ok, started = pcall(startIntentCheck, turn)
+    local ok, started = pcall(startCheck, turn, registry.INTENT, nil, onIntent)
     if not ok then
         print('LLM intent check: ' .. tostring(started))
     end
@@ -1229,7 +1002,13 @@ return {
                 end
             end
         end),
-        LLMTransferApplied = guarded('transfer result', onTransferApplied),
+        LLMTransferApplied = guarded('transfer result', function(result)
+            if pending and pending.stage == 'applying' and pending.onApplied then
+                local done = pending.onApplied
+                pending.onApplied = nil
+                done(result)
+            end
+        end),
         LLMFollowers = function(data)
             followerStates = {}
             for _, entry in ipairs(data.followers or {}) do
