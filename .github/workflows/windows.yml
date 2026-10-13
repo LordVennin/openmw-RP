@@ -112,6 +112,7 @@ jobs:
         -D OPENMW_USE_SYSTEM_SQLITE3=OFF
         -D OPENMW_USE_SYSTEM_YAML_CPP=OFF
         -D OPENMW_LTO_BUILD=ON
+        -D OPENMW_DEPLOY_RUNTIME_DEPENDENCIES=OFF
         ${{ inputs.package && '-D "VCREDIST64=$env:VCToolsRedistDir/vc_redist.x64.exe"' || '' }}
         -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
 
