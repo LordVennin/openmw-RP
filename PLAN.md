@@ -85,7 +85,7 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
   - [x] action registry: one module per action
   - [x] NPC services through conversation, asked for by the player or offered by the NPC
   - [x] vanilla service gates (guild membership and rank, refusals) checked by the engine
-  - [ ] streaming replies, as an option in the settings
+  - [x] streaming replies, as an option in the settings (off by default)
   - [ ] more actions on the registry (bribes, bounties, topics)
 - [ ] Character content: more cards and lore. Secret memberships (e.g. Blades trainers) must stay secret: the `[Scene]` note currently lists every faction the NPC belongs to, so cards or a secret-faction list need to tell the model to hide them.
 
@@ -181,6 +181,8 @@ Fewer options make the classifier more accurate. `player.lua` gives actions a sm
 - **Refusals:** the engine's own dialogue filter evaluates vanilla's "Service Refusal" dialogue (`openmw.llm.serviceRefusal`, the same check as clicking the service topic), so every vanilla gate applies: guild membership and rank, expulsion, disposition, bounty and quest state. A refusing NPC plays out vanilla's refusal line instead, and no window can be opened, whether the player asked or the NPC offered.
 - **NPC offers:** the after-reply check also catches the NPC offering a service, in the same request as the item check. It only runs when the reply mentions items or service words.
 - **Live test:** 30 of 32 player lines and NPC replies were classified right (`tests/llm/live_actions.sh`). The two misses are borderline: "Where can I buy armor around here?" to a trader offers Barter, and "Who taught you to fight like that?" counts as flattery.
+
+**Streaming replies** (the Stream Replies setting, off by default): the reply request asks llama-server to stream, and `llm.request(..., { stream = callback })` reads the server-sent events on the worker thread. Each frame, the callback gets the new event payloads, always before the request's final callback. The reply grows in the dialogue window through `llm.setDialogueResponse`, at most every 0.1 s. Each update is sanitized like the final reply, so speaker names and special tokens never flash on screen. The finished, trimmed reply then replaces it. Only the reply streams; the action checks are short JSON answers. If the server fails midway, the partial text stays visible but isn't remembered.
 
 ## Phase 2.5: the bundled server
 

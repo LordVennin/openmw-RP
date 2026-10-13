@@ -49,9 +49,12 @@ namespace MWLua
         void setServer(const LlmServer* server) { mServer = server; }
 
         // Queues a POST of `body` to the endpoint on 127.0.0.1.
+        // With `onChunk`, the response is read as a stream of server-sent events (the body must ask the server to
+        // stream): onChunk gets the events' data payloads as they arrive, at most once per frame, and the final
+        // callback gets the last payload as its body.
         // Returns the request id, or std::nullopt if sMaxPending requests are already waiting.
-        std::optional<int> request(
-            Endpoint endpoint, std::string body, LuaUtil::Callback callback, std::chrono::seconds timeout);
+        std::optional<int> request(Endpoint endpoint, std::string body, LuaUtil::Callback callback,
+            std::chrono::seconds timeout, std::optional<LuaUtil::Callback> onChunk = std::nullopt);
 
         // Drops the request's callback and aborts it if it is queued or running.
         // Returns false if the request is unknown or its callback was already queued.
@@ -71,6 +74,7 @@ namespace MWLua
             Endpoint mEndpoint;
             std::string mBody;
             std::chrono::seconds mTimeout;
+            bool mStream;
         };
 
         struct Result
@@ -83,10 +87,13 @@ namespace MWLua
 
         void run(std::stop_token stopToken);
         void stopRunningRequest();
+        // Worker thread: adds the complete events in `buffer` to mChunks, keeping an incomplete one
+        void takeEvents(int id, std::string& buffer, std::string& last);
 
         // Lua thread only.
         const LlmServer* mServer = nullptr;
         std::map<int, LuaUtil::Callback> mCallbacks;
+        std::map<int, LuaUtil::Callback> mChunkCallbacks;
         int mNextId = 1;
 
         // Shared with the worker thread, guarded by mMutex.
@@ -94,6 +101,8 @@ namespace MWLua
         std::condition_variable_any mCondition;
         std::deque<Job> mPending;
         std::vector<Result> mFinished;
+        // Streamed event payloads not yet delivered, by request id
+        std::map<int, std::vector<std::string>> mChunks;
         std::optional<int> mRunningId;
         // Points to a client on the worker's stack. The worker clears it under mMutex before the client
         // is destroyed, so it is only valid to use while holding mMutex.

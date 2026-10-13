@@ -571,6 +571,7 @@ namespace MWGui
         mHistoryContents.clear();
         mLuaChoices.clear();
         mLuaBusy = false;
+        mLiveResponse.reset();
     }
 
     bool DialogueWindow::setKeywords(const std::list<std::string>& keyWords)
@@ -879,7 +880,24 @@ namespace MWGui
         updateHistory();
     }
 
-    void DialogueWindow::setLuaBusy(bool busy)
+    void DialogueWindow::setLiveResponse(std::string_view text)
+    {
+        if (mLiveResponse && *mLiveResponse < mHistoryContents.size())
+            mHistoryContents[*mLiveResponse]->mText = text;
+        else
+        {
+            mLiveResponse = mHistoryContents.size();
+            mHistoryContents.push_back(std::make_unique<Response>(text));
+        }
+        updateHistory();
+    }
+
+    void DialogueWindow::endLiveResponse()
+    {
+        mLiveResponse.reset();
+    }
+
+        void DialogueWindow::setLuaBusy(bool busy)
     {
         if (mLuaBusy == busy)
             return;

@@ -237,6 +237,9 @@ local function cancelPending()
         if pending.stage == 'confirmBefore' or pending.stage == 'confirmAfter' then
             llm.setDialogueChoices({})
         end
+        if pending.shown then
+            llm.endDialogueResponse()
+        end
         pending = nil
     end
     llm.setDialogueBusy(false)
@@ -575,6 +578,37 @@ local function startLeaveCheck(turn, reply)
     return started
 end
 
+local function sanitizeOptions(turn)
+    return { specialTokens = template().specialTokens, speakerName = turn.npcName }
+end
+
+-- Streaming (the Stream Replies setting): the reply grows in the dialogue window as the server writes it. Each update
+-- is sanitized like the final reply, so speaker names, special tokens and emojis never flash on screen.
+local STREAM_INTERVAL = 0.1 -- seconds of real time between window updates
+
+local function onReplyChunk(id, payloads)
+    if not pending or pending.id ~= id or pending.stage ~= 'reply' then
+        return
+    end
+    local turn = pending
+    for _, payload in ipairs(payloads) do
+        local ok, data = pcall(json.decode, payload)
+        if ok and type(data) == 'table' and type(data.content) == 'string' then
+            turn.streamed = turn.streamed .. data.content
+        end
+    end
+    local now = core.getRealTime()
+    if turn.shownAt and now - turn.shownAt < STREAM_INTERVAL then
+        return
+    end
+    local text = sanitize.reply(turn.streamed, sanitizeOptions(turn))
+    if text ~= '' and text ~= turn.shown then
+        turn.shown = text
+        turn.shownAt = now
+        llm.setDialogueResponse(text)
+    end
+end
+
 local function onReply(id, response)
     if not pending or pending.id ~= id or pending.stage ~= 'reply' then
         return
@@ -582,18 +616,19 @@ local function onReply(id, response)
     local turn = pending
 
     if not response.ok then
+        if turn.shown then
+            llm.endDialogueResponse() -- the partial reply stays visible, but isn't remembered
+        end
         local errorText = response.error or ('HTTP ' .. tostring(response.status))
         ui.showMessage(l10n('serverError', { error = errorText }), { showInDialogue = true })
         finishTurn()
         return
     end
+    -- Streamed: the text came in chunks, and the body is the last event (with stop_type)
     local ok, data = pcall(json.decode, response.body)
-    local content = ok and type(data) == 'table' and data.content or ''
-    local reply = sanitize.reply(content, {
-        specialTokens = template().specialTokens,
-        speakerName = turn.npcName,
-    })
-    if ok and data.stop_type == 'limit' then
+    local content = turn.streamed or (ok and type(data) == 'table' and data.content) or ''
+    local reply = sanitize.reply(content, sanitizeOptions(turn))
+    if ok and type(data) == 'table' and data.stop_type == 'limit' then
         reply = sanitize.trimIncomplete(reply)
     end
     if reply == '' then
@@ -602,7 +637,12 @@ local function onReply(id, response)
     local history = historyFor(turn.npc)
     table.insert(history.turns, { role = 'user', text = turn.userText })
     table.insert(history.turns, { role = 'model', text = reply })
-    llm.addDialogueResponse(reply)
+    if turn.streamed then
+        llm.setDialogueResponse(reply)
+        llm.endDialogueResponse()
+    else
+        llm.addDialogueResponse(reply)
+    end
 
     if turn.endReason then
         -- Decided before the reply (about to attack, or fed up): the reply played it out
@@ -735,9 +775,18 @@ startReply = function(turn)
     body.temperature = generalSettings:get('temperature') or body.temperature
 
     local id
+    local options = { endpoint = 'completion', timeout = REQUEST_TIMEOUT }
+    turn.streamed, turn.shown, turn.shownAt = nil, nil, nil
+    if generalSettings:get('streamReplies') then
+        body.stream = true
+        turn.streamed = ''
+        options.stream = async:callback(guarded('reply stream', function(payloads)
+            onReplyChunk(id, payloads)
+        end))
+    end
     local requestId, err = llm.request(json.encode(body), async:callback(guarded('reply', function(response)
         onReply(id, response)
-    end)), { endpoint = 'completion', timeout = REQUEST_TIMEOUT })
+    end)), options)
     if not requestId then
         ui.showMessage(l10n('serverError', { error = err }), { showInDialogue = true })
         finishTurn()

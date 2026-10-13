@@ -5,6 +5,8 @@ generalGroup: "General"
 
 enabled: "Enable AI Dialogue"
 enabledDescription: "Shows a text box in the dialogue window for talking to NPCs in your own words."
+streamReplies: "Stream Replies"
+streamRepliesDescription: "Shows the NPC's reply word by word as it is written, instead of all at once when it is finished."
 
 replyTokens: "Maximum Reply Length"
 replyTokensDescription: |

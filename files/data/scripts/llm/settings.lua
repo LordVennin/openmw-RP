@@ -23,6 +23,13 @@ I.Settings.registerGroup({
             default = true,
         },
         {
+            key = 'streamReplies',
+            renderer = 'checkbox',
+            name = 'streamReplies',
+            description = 'streamRepliesDescription',
+            default = false,
+        },
+        {
             key = 'replyTokens',
             renderer = 'number',
             name = 'replyTokens',

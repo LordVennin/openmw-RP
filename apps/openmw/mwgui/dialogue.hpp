@@ -2,6 +2,7 @@
 #define MWGUI_DIALOGE_H
 
 #include <memory>
+#include <optional>
 
 #include "referenceinterface.hpp"
 #include "windowbase.hpp"
@@ -179,6 +180,11 @@ namespace MWGui
         /// While a Lua script is busy (an NPC's reply is being written), Goodbye and Escape can't close the window.
         void setLuaBusy(bool busy);
 
+        /// A response that grows while a Lua script streams it in: the first call adds it, later calls replace its
+        /// text, until endLiveResponse().
+        void setLiveResponse(std::string_view text);
+        void endLiveResponse();
+
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
 
@@ -228,6 +234,8 @@ namespace MWGui
         std::vector<BookTypesetter::Style*> mChoiceStyles;
         bool mGoodbye;
         bool mLuaBusy = false;
+        // Index in mHistoryContents of the response set by setLiveResponse, if one is growing
+        std::optional<std::size_t> mLiveResponse;
 
         std::vector<std::unique_ptr<Link>> mLinks;
         std::unordered_map<std::string, std::unique_ptr<Link>> mTopicLinks;

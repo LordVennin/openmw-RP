@@ -51,20 +51,26 @@ namespace MWLua
         sol::table api(lua, sol::create);
         api["ping"] = []() -> std::string { return "pong"; };
 
-        api["request"] = [context, lua](std::string body, const sol::table& callback,
+        // The Lua state comes in as sol::this_state: a captured sol::state_view would hold a registry reference that is
+        // released while Lua closes at exit, which crashes
+        api["request"] = [context](sol::this_state lua, std::string body, const sol::table& callback,
                              const sol::optional<sol::table>& options) -> std::tuple<sol::object, sol::object> {
             double timeout = sDefaultTimeoutSeconds;
             LlmClient::Endpoint endpoint = LlmClient::Endpoint::ChatCompletions;
+            // stream = async:callback(function(payloads) ... end): read the reply as server-sent events
+            std::optional<LuaUtil::Callback> onChunk;
             if (options.has_value())
             {
                 timeout = options->get_or("timeout", sDefaultTimeoutSeconds);
                 if (sol::optional<std::string_view> name = (*options)["endpoint"])
                     endpoint = parseEndpoint(*name);
+                if (sol::optional<sol::table> stream = (*options)["stream"])
+                    onChunk = LuaUtil::Callback::fromLua(*stream);
             }
             timeout = std::clamp(timeout, sMinTimeoutSeconds, sMaxTimeoutSeconds);
 
             std::optional<int> id = context.mLuaManager->llmClient().request(endpoint, std::move(body),
-                LuaUtil::Callback::fromLua(callback), std::chrono::seconds(static_cast<int>(timeout)));
+                LuaUtil::Callback::fromLua(callback), std::chrono::seconds(static_cast<int>(timeout)), std::move(onChunk));
             if (!id.has_value())
                 return { sol::nil, sol::make_object(lua, "too many pending requests") };
             return { sol::make_object(lua, *id), sol::nil };
@@ -72,7 +78,7 @@ namespace MWLua
 
         api["cancel"] = [context](int id) { return context.mLuaManager->llmClient().cancel(id); };
 
-        api["serverStatus"] = [context, lua]() {
+        api["serverStatus"] = [context](sol::this_state lua) {
             sol::table result(lua, sol::create);
             const LlmServer* server = context.mLuaManager->llmServer();
             if (server == nullptr)
@@ -154,6 +160,28 @@ namespace MWLua
                 }
             }
             return sol::nullopt;
+        };
+
+        // A response that grows while the NPC's reply streams in: the first call adds it to the dialogue history,
+        // later calls replace its text, until endDialogueResponse()
+        api["setDialogueResponse"] = [context](std::string text) {
+            context.mLuaManager->addAction(
+                [text = std::move(text)] {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (windowManager->containsMode(MWGui::GM_Dialogue))
+                        windowManager->getDialogueWindow()->setLiveResponse(text);
+                },
+                "setDialogueResponseAction");
+        };
+
+        api["endDialogueResponse"] = [context]() {
+            context.mLuaManager->addAction(
+                [] {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (windowManager->containsMode(MWGui::GM_Dialogue))
+                        windowManager->getDialogueWindow()->endLiveResponse();
+                },
+                "endDialogueResponseAction");
         };
 
         api["setDialogueBusy"] = [context](bool busy) {
