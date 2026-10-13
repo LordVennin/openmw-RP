@@ -69,6 +69,15 @@ local function isEnabled()
     return generalSettings:get('enabled') ~= false
 end
 
+-- Why the AI server can't take requests yet, as a hint for the text box, or nil if it can
+local serverHints = { starting = 'serverLoading', noModel = 'serverNoModel', failed = 'serverFailed' }
+local function serverHint()
+    local key = serverHints[llm.serverStatus().state]
+    return key and l10n(key)
+end
+-- Whether the text box is waiting for the server, so onFrame enables it once the server is ready
+local waitingForServer = false
+
 local function template()
     return templates.templates[advancedSettings:get('template') or templates.default]
         or templates.templates[templates.default]
@@ -155,6 +164,13 @@ local function canRecall()
 end
 
 local function setInput(enabled, hint)
+    waitingForServer = false
+    if enabled then
+        local notReady = serverHint()
+        if notReady then
+            enabled, hint, waitingForServer = false, notReady, true
+        end
+    end
     llm.setDialogueInput({
         visible = isEnabled() and not chatEnded,
         enabled = enabled,
@@ -692,8 +708,12 @@ local function onTransferApplied(result)
     end
 end
 
-local CHAT_BLOCK_HOURS = 24
-local ATTACK_BLOCK_HOURS = 72
+-- How long an NPC refuses to talk after ending the conversation, by the Refusal Duration setting
+local REFUSAL_HOURS = {
+    off = { chat = 0, attack = 0 },
+    short = { chat = 4, attack = 12 },
+    normal = { chat = 24, attack = 72 },
+}
 
 -- The NPC ends the AI conversation: notice, a single Goodbye choice, and they refuse to talk for a while
 local function endChat(turn, reason)
@@ -702,8 +722,11 @@ local function endChat(turn, reason)
     ui.showMessage(l10n('endsConversation', { name = turn.npcName }), { showInDialogue = true })
     llm.setDialogueInput({ visible = false })
     llm.setDialogueChoices({ { id = 'goodbye', label = l10n('goodbyeChoice') } })
-    local hours = reason == 'attack' and ATTACK_BLOCK_HOURS or CHAT_BLOCK_HOURS
-    blocked[turn.npc.id] = core.getGameTime() + hours * 3600
+    local refusal = REFUSAL_HOURS[generalSettings:get('refusalDuration')] or REFUSAL_HOURS.normal
+    local hours = reason == 'attack' and refusal.attack or refusal.chat
+    if hours > 0 then
+        blocked[turn.npc.id] = core.getGameTime() + hours * 3600
+    end
     local event = reason == 'attack' and '%s lost their temper and attacked the stranger.'
         or '%s angrily ended a conversation with the stranger.'
     table.insert(historyFor(turn.npc).events, string.format(event, turn.npcName))
@@ -960,7 +983,7 @@ local function sendLine(npc, rawText)
         npc = npc,
         npcName = npcName,
         userText = userText,
-        limits = budget.fromContextSize(advancedSettings:get('contextSize'), generalSettings:get('replyTokens')),
+        limits = budget.fromContextSize(llm.serverStatus().contextSize, generalSettings:get('replyTokens')),
     }
     pending = turn
 
@@ -1180,6 +1203,12 @@ return {
     engineHandlers = {
         onSave = onSave,
         onLoad = onLoad,
+        -- Runs while the game is paused in dialogue: enables the text box once the server is ready
+        onFrame = function()
+            if waitingForServer and dialogueNpc and not pending and not serverHint() then
+                setInput(true)
+            end
+        end,
     },
     eventHandlers = {
         UiModeChanged = onUiModeChanged,

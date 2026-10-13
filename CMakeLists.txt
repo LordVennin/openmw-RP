@@ -751,6 +751,11 @@ if (BUILD_OPENMW OR BUILD_OPENMW_TESTS)
     add_subdirectory( apps/openmw )
 endif()
 
+option(OPENMW_BUNDLE_LLAMA_SERVER "Build llama-server for AI dialogue and put it next to openmw" ON)
+if (BUILD_OPENMW AND OPENMW_BUNDLE_LLAMA_SERVER)
+    include(LlamaServer)
+endif()
+
 if (BUILD_BSATOOL)
     add_subdirectory( apps/bsatool )
 endif()

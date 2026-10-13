@@ -10,6 +10,7 @@
 #include "categories/gui.hpp"
 #include "categories/hud.hpp"
 #include "categories/input.hpp"
+#include "categories/llm.hpp"
 #include "categories/lua.hpp"
 #include "categories/map.hpp"
 #include "categories/models.hpp"
@@ -60,6 +61,7 @@ namespace Settings
         ModelsCategory mModels{ mIndex };
         GroundcoverCategory mGroundcover{ mIndex };
         LuaCategory mLua{ mIndex };
+        LlmCategory mLlm{ mIndex };
         StereoCategory mStereo{ mIndex };
         StereoViewCategory mStereoView{ mIndex };
         PostProcessingCategory mPostProcessing{ mIndex };
@@ -202,6 +204,11 @@ namespace Settings
     inline LuaCategory& lua()
     {
         return values().mLua;
+    }
+
+    inline LlmCategory& llm()
+    {
+        return values().mLlm;
     }
 
     inline StereoCategory& stereo()

@@ -21,6 +21,7 @@
 #include "engineevents.hpp"
 #include "globalscripts.hpp"
 #include "llmclient.hpp"
+#include "llmserver.hpp"
 #include "loadscripts.hpp"
 #include "localscripts.hpp"
 #include "luaevents.hpp"
@@ -193,6 +194,12 @@ namespace MWLua
 
         LlmClient& llmClient() { return *mLlmClient; }
 
+        // Starts the LLM server (or finds a running one) in the background. Called once at game start.
+        void startLlmServer(LlmServer::Paths paths);
+
+        // Null until startLlmServer() is called
+        const LlmServer* llmServer() const { return mLlmServer.get(); }
+
         bool isProcessingInputEvents() const { return mProcessingInputEvents; }
 
         void reportStats(unsigned int frameNumber, osg::Stats& stats) const;
@@ -282,6 +289,8 @@ namespace MWLua
 
         LuaUtil::ScriptTracker mScriptTracker;
 
+        // Stopped after the client, which sends requests to its port
+        std::unique_ptr<LlmServer> mLlmServer;
         // Declared last so it is destroyed first, while the Lua state that owns its callbacks still exists.
         std::unique_ptr<LlmClient> mLlmClient = std::make_unique<LlmClient>();
     };

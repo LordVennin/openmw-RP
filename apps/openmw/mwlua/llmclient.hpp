@@ -22,6 +22,7 @@ namespace httplib
 
 namespace MWLua
 {
+    class LlmServer;
     class LuaManager;
 
     // Sends chat requests from the openmw.llm package to a local LLM server (e.g. llama-server)
@@ -44,7 +45,10 @@ namespace MWLua
 
         // The functions below must only be called from the Lua thread.
 
-        // Queues a POST of `body` to the endpoint on 127.0.0.1:<llm port>.
+        // Requests go to the server's port. Without a server, to the [LLM] port setting.
+        void setServer(const LlmServer* server) { mServer = server; }
+
+        // Queues a POST of `body` to the endpoint on 127.0.0.1.
         // Returns the request id, or std::nullopt if sMaxPending requests are already waiting.
         std::optional<int> request(
             Endpoint endpoint, std::string body, LuaUtil::Callback callback, std::chrono::seconds timeout);
@@ -81,6 +85,7 @@ namespace MWLua
         void stopRunningRequest();
 
         // Lua thread only.
+        const LlmServer* mServer = nullptr;
         std::map<int, LuaUtil::Callback> mCallbacks;
         int mNextId = 1;
 

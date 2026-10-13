@@ -60,6 +60,7 @@ The ranges included with each setting are the physically possible ranges, not re
         GUI <GUI>
         HUD <HUD>
         Input <input>
+        LLM <llm>
         Lua <lua>
         Map <map>
         Models <models>

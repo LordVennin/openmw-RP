@@ -774,6 +774,7 @@ void OMW::Engine::prepareEngine()
 
     mLuaManager = std::make_unique<MWLua::LuaManager>(mVFS.get(), mResDir / "lua_libs");
     mEnvironment.setLuaManager(*mLuaManager);
+    mLuaManager->startLlmServer({ mCfgMgr.getLocalPath(), mCfgMgr.getUserDataPath(), mCfgMgr.getLogPath() });
 
     // Create input and UI first to set up a bootstrapping environment for
     // showing a loading screen and keeping the window responsive while doing so

@@ -7,6 +7,7 @@
 
 #include <components/settings/values.hpp>
 
+#include "llmserver.hpp"
 #include "luamanagerimp.hpp"
 
 namespace MWLua
@@ -54,7 +55,8 @@ namespace MWLua
             if (mPending.size() >= sMaxPending)
                 return std::nullopt;
             id = mNextId++;
-            mPending.push_back(Job{ id, Settings::lua().mLlmPort, endpoint, std::move(body), timeout });
+            const int port = mServer != nullptr ? mServer->port() : Settings::llm().mPort.get();
+            mPending.push_back(Job{ id, port, endpoint, std::move(body), timeout });
         }
         mCallbacks.emplace(id, std::move(callback));
         mCondition.notify_one();

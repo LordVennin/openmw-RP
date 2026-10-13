@@ -18,11 +18,14 @@ temperatureDescription: |
 
 advancedGroup: "Advanced"
 
-contextSize: "Context Size"
-contextSizeDescription: |
-    Must match the context size the LLM server was started with (llama-server -c).
-    Every prompt limit (card, scene and history size) is derived from it.
-    (default: 8192)
+refusalDuration: "Refusal Duration"
+refusalDurationDescription: |
+    How long an NPC refuses to talk to you after angrily ending a conversation.
+      Off: they talk again right away.
+      Short: 4 game hours, or 12 after attacking you.
+      Normal: a day, or 3 days after attacking you.
+short: "Short"
+normal: "Normal"
 
 sceneDetail: "Scene Detail"
 sceneDetailDescription: |
@@ -44,6 +47,9 @@ beforeLastMessage: "Before Last Message"
 
 thinking: "{name} is thinking..."
 serverError: "(The AI server could not be reached: {error})"
+serverLoading: "The AI is still loading..."
+serverNoModel: "No AI model installed."
+serverFailed: "The AI server could not start. See llama-server.log."
 recall: "Recall"
 earlierConversation: "Earlier conversation"
 nowHeading: "Now"

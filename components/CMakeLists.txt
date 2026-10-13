@@ -78,6 +78,7 @@ add_component_dir (settings
     categories/gui
     categories/hud
     categories/input
+    categories/llm
     categories/lua
     categories/map
     categories/models

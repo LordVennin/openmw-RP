@@ -68,7 +68,7 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
 - [x] Phase 0: get a clean build of unmodified OpenMW running.
 - [x] Phase 1: have Claude Code map how an existing Lua package is registered in `apps/openmw/mwlua/`, then add a trivial `openmw.llm.ping()` to prove the plumbing.
 - [x] Phase 2: add the async HTTP request (a header-only library like cpp-httplib keeps dependencies simple) and test it from the Lua console.
-- [ ] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`). Also a setting for how long an NPC refuses to talk after ending a conversation (off, short, or the current 24h/72h).
+- [x] Phase 2.5: bundle llama-server in CMake; the game auto-launches it. Also add user-facing context settings: one context size feeds both llama-server's `-c` and the mod's prompt budget (`scripts/llm/budget.lua`). Also a setting for how long an NPC refuses to talk after ending a conversation (off, short, or the current 24h/72h).
 - [x] Phase 3: write the Lua mod: card loader, prompt builder, chat window. Built as a text input inside the vanilla dialogue window (see below).
 - [ ] Phase 3.5: launcher AI tab: GPU detection, model download, settings.
 - [ ] Phase 4: add game actions, memory, and the lorebook. In progress:
@@ -153,6 +153,26 @@ The player then sees a notice and a single Goodbye choice. The NPC refuses to ta
 
 **Memory:** when a window closes on a history longer than 16 turns, everything but the last 8 turns is summarized in the background, merged with any earlier summary. The summary is saved, given to the model as `[What X remembers]` within its own budget share, and shown first in Recall.
 
+## Phase 2.5: the bundled server
+
+**Build:** `cmake/LlamaServer.cmake` builds llama.cpp `b11559` as a separate project (`ExternalProject`) and copies `llama-server`, its libraries and backend plug-ins to a `llama/` folder next to `openmw`. Backends are plug-ins (`GGML_BACKEND_DL`): one build carries CPU (every instruction-set variant), plus CUDA if a CUDA compiler is found and Vulkan if Vulkan and `glslc` are found. Options:
+- `OPENMW_BUNDLE_LLAMA_SERVER` (ON);
+- `OPENMW_LLAMA_CUDA` and `OPENMW_LLAMA_VULKAN` (AUTO, ON or OFF);
+- `OPENMW_LLAMA_CUDA_ARCHITECTURES` (`native`; a list for releases);
+- `OPENMW_LLAMA_SOURCE_DIR` (build from a local checkout instead of downloading).
+
+**Start-up** (`apps/openmw/mwlua/llmserver.cpp`): a monitor thread started with the game.
+1. If a server already answers on `[LLM] port`, it is used ("external").
+2. Otherwise, with `server autostart` on, it finds the model (`[LLM] model`, or the first `.gguf` in `<user data>/models/`) and the device. `auto` runs `llama-server --list-devices` and takes the first CUDA, ROCm, Vulkan or Metal device, else the CPU. Only one device is passed, so the same GPU is never used twice through two backends.
+3. It starts llama-server hidden on the first free port from `[LLM] port`, polls `/health` until the model is loaded, and reads the real context size from `/props`.
+4. The server is stopped when the game exits. If the game crashes, Linux stops it through `PR_SET_PDEATHSIG` and Windows through a kill-on-close job object.
+
+**Lua:** `openmw.llm.serverStatus()` returns `state` (`starting`, `ready`, `external`, `disabled`, `noModel` or `failed`), `contextSize`, `model`, `device` and `error`. The prompt budget uses the server's context size, so it always matches `-c`. Until the server is ready, the text box is disabled with a hint and enables itself.
+
+**Settings for players:** `[LLM]` in `settings.cfg` for now (the server can only be configured before it starts); the 3.5 launcher tab will edit them and ask for the device at setup. In game, AI Dialogue → General → Refusal Duration sets how long an NPC refuses to talk after ending a conversation.
+
+Windows process code is written but not yet compiled or tested.
+
 ## Dev setup
 
 llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs on an RTX 4090 (24 GB).
@@ -167,13 +187,15 @@ llama.cpp is built with CUDA in `~/llm/llama.cpp`, outside this repo, and runs o
 | `gemma-4-12b-it-Q6_K.gguf` (9.8 GB) | [unsloth](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF) | Gemma 4 | Base model. |
 | `gemma-4-12b-it-roleplay-sft-epoch2-bf16.Q6_K.gguf` (9.8 GB) | [mradermacher](https://huggingface.co/mradermacher/gemma-4-12b-it-roleplay-sft-epoch2-bf16-GGUF) | Gemma 4 | **Broken on this llama.cpp build:** gibberish even through SillyTavern, though it works in oobabooga. Don't use. |
 
-**Launch command:**
+**The game starts the server itself** (Phase 2.5). The build puts `llama-server` and its backend plug-ins in `build/llama/`, and the game starts it from there, with the first `.gguf` in `~/.local/share/openmw/models/` (the dev models are symlinked there). Settings are in the `[LLM]` section of `settings.cfg`. The server's output goes to `~/.config/openmw/llama-server.log`.
+
+**Hand-run server**, for testing models outside the game. The game uses it instead of starting its own while it runs on the `[LLM] port` (8080):
 
 ```
 ~/llm/llama.cpp/build/bin/llama-server -m ~/llm/models/Gemma4-12B-RP.i1-Q6_K.gguf -ngl 99 -c 8192 --jinja --port 8080
 ```
 
-The mod uses the text-completion endpoint `http://localhost:8080/completion`. Set **AI Dialogue → Advanced → Instruct Template** to match the model: Gemma 4 for the Gemma models; Metharme or Mistral Tekken for Rocinante.
+The mod uses the text-completion endpoint `/completion`. Set **AI Dialogue → Advanced → Instruct Template** to match the model: Gemma 4 for the Gemma models; Metharme or Mistral Tekken for Rocinante.
 
 **Model comparison** (Oct 12, 2026). Every model got the same prompt built by the mod: Fargoth's card, the scene and knowledge notes, the vanilla greeting, two turns of the ring conversation, then "what can you offer me for this ring?". Each model ran five fixed seeds with the mod's samplers.
 - **Gemma4-12B-RP:** 5/5 clean; the most grounded in the card (Sellus Gravius, Elone, Arrille's tradehouse, glances at the lighthouse); concise; always stops on its own.

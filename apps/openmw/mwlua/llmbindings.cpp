@@ -9,6 +9,7 @@
 
 #include <components/lua/asyncpackage.hpp>
 #include <components/lua/luastate.hpp>
+#include <components/settings/values.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
@@ -62,6 +63,27 @@ namespace MWLua
         };
 
         api["cancel"] = [context](int id) { return context.mLuaManager->llmClient().cancel(id); };
+
+        api["serverStatus"] = [context, lua]() {
+            sol::table result(lua, sol::create);
+            const LlmServer* server = context.mLuaManager->llmServer();
+            if (server == nullptr)
+            {
+                result["state"] = "disabled";
+                result["contextSize"] = Settings::llm().mContextSize.get();
+                return result;
+            }
+            LlmServer::Status status = server->status();
+            result["state"] = LlmServer::stateName(status.mState);
+            result["contextSize"] = status.mContextSize;
+            if (!status.mModel.empty())
+                result["model"] = std::move(status.mModel);
+            if (!status.mDevice.empty())
+                result["device"] = std::move(status.mDevice);
+            if (!status.mError.empty())
+                result["error"] = std::move(status.mError);
+            return result;
+        };
 
         // Dialogue window integration. GUI changes are queued to run on the main thread.
         api["setDialogueInput"] = [context](const sol::table& options) {

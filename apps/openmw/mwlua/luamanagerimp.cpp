@@ -126,6 +126,12 @@ namespace MWLua
         LuaUi::clearSettings();
     }
 
+    void LuaManager::startLlmServer(LlmServer::Paths paths)
+    {
+        mLlmServer = std::make_unique<LlmServer>(std::move(paths));
+        mLlmClient->setServer(mLlmServer.get());
+    }
+
     void LuaManager::initConfiguration(bool reload)
     {
         mConfiguration.init(MWBase::Environment::get().getESMStore()->getLuaScriptsCfg(), reload);

@@ -38,6 +38,14 @@ I.Settings.registerGroup({
             default = 0.85,
             argument = { min = 0, max = 2 },
         },
+        {
+            key = 'refusalDuration',
+            renderer = 'select',
+            name = 'refusalDuration',
+            description = 'refusalDurationDescription',
+            default = 'normal',
+            argument = { l10n = 'LLMDialogue', items = { 'off', 'short', 'normal' } },
+        },
     },
 })
 
@@ -49,14 +57,6 @@ I.Settings.registerGroup({
     permanentStorage = true,
     order = 1,
     settings = {
-        {
-            key = 'contextSize',
-            renderer = 'number',
-            name = 'contextSize',
-            description = 'contextSizeDescription',
-            default = 8192,
-            argument = { integer = true, min = 2048, max = 131072 },
-        },
         {
             key = 'template',
             renderer = 'select',
