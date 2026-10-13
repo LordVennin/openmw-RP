@@ -91,11 +91,14 @@ else()
     )
 endif()
 
+# A fixed job count: without one, make runs unlimited jobs and can run out of memory
+cmake_host_system_information(RESULT llama_jobs QUERY NUMBER_OF_LOGICAL_CORES)
+
 ExternalProject_Add(llama_server
     ${llama_source}
     PREFIX "${CMAKE_BINARY_DIR}/extern/llama.cpp"
     CMAKE_ARGS ${llama_args}
-    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release --target llama-server --parallel
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release --target llama-server --parallel ${llama_jobs}
     INSTALL_COMMAND ${CMAKE_COMMAND} -DSOURCE=<BINARY_DIR>/bin "-DDESTINATION=$<TARGET_FILE_DIR:openmw>/llama"
         -P "${CMAKE_CURRENT_LIST_DIR}/CopyLlamaServer.cmake"
     BUILD_ALWAYS ${llama_build_always}

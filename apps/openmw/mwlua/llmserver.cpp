@@ -13,6 +13,10 @@
 #include <utility>
 
 #include <httplib.h>
+#ifdef __APPLE__
+// macOS headers pulled in by httplib define nil, which breaks sol::nil
+#undef nil
+#endif
 
 #include <components/debug/debuglog.hpp>
 #include <components/files/conversion.hpp>
