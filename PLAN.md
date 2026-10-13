@@ -171,7 +171,7 @@ The player then sees a notice and a single Goodbye choice. The NPC refuses to ta
 
 **Settings for players:** `[LLM]` in `settings.cfg`, edited in the launcher's AI Dialogue tab (Phase 3.5); the server can only be configured before it starts. In game, AI Dialogue → General → Refusal Duration sets how long an NPC refuses to talk after ending a conversation.
 
-The Windows build compiles and passes OpenMW's tests in CI (GitHub Actions); the Windows process code is not yet tested on a real machine. On macOS the bundled server is off by default (`OPENMW_BUNDLE_LLAMA_SERVER`): inside the app bundle its libraries would need relinking for packaging, so Mac players use a server they start themselves.
+The Windows build compiles and passes OpenMW's tests in CI (GitHub Actions), with the CPU and Vulkan backends (the Vulkan SDK is installed for the build); the Windows process code is not yet tested on a real machine. On macOS the bundled server is off by default (`OPENMW_BUNDLE_LLAMA_SERVER`): inside the app bundle its libraries would need relinking for packaging, so Mac players use a server they start themselves.
 
 ## Phase 3.5: the launcher's AI Dialogue tab
 
