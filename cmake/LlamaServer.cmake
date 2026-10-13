@@ -30,9 +30,11 @@ else()
 endif()
 
 if (OPENMW_LLAMA_VULKAN STREQUAL "AUTO")
+    # Forward slashes: vcpkg's find_package wrapper re-parses its arguments, so Windows backslashes become escapes
+    file(TO_CMAKE_PATH "$ENV{VULKAN_SDK}" llama_vulkan_sdk)
     find_package(Vulkan QUIET)
-    find_program(OPENMW_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin")
-    find_package(SPIRV-Headers CONFIG QUIET HINTS "$ENV{VULKAN_SDK}")
+    find_program(OPENMW_GLSLC glslc HINTS "${llama_vulkan_sdk}/bin")
+    find_package(SPIRV-Headers CONFIG QUIET HINTS "${llama_vulkan_sdk}")
     if (Vulkan_FOUND AND OPENMW_GLSLC AND SPIRV-Headers_FOUND)
         set(llama_vulkan ON)
     else()
