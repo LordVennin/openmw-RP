@@ -52,10 +52,12 @@ local function useQuestAmount(game, turn, transfer, candidates)
 end
 
 -- Moves the item through the global script, with vanilla quest effects when the player gives, then calls
--- done(result, label, rewards) once it has happened (result.ok false if it failed).
-local function applyTransfer(game, turn, transfer, done)
+-- done(result, label, rewards, effects) once it has happened (result.ok false if it failed).
+-- @param options { event = history event instead of the default, noQuestEffects = true } (optional)
+local function applyTransfer(game, turn, transfer, done, options)
+    options = options or {}
     local effects = nil
-    if transfer.transfer == check.PLAYER_GIVES then
+    if transfer.transfer == check.PLAYER_GIVES and not options.noQuestEffects then
         local ok, found = pcall(handover.find, turn.npc, game.player, transfer.item, game.locals(turn.npc),
             transfer.count)
         effects = ok and found or nil
@@ -86,7 +88,9 @@ local function applyTransfer(game, turn, transfer, done)
             game.notice('itemAdded', { item = rewardLabel })
         end
         local event
-        if effects and effects.note then
+        if options.event then
+            event = options.event
+        elseif effects and effects.note then
             event = effects.note
         elseif result.transfer == check.PLAYER_GIVES then
             event = string.format('The stranger gave %s %s.', turn.npcName, label)
@@ -101,37 +105,60 @@ local function applyTransfer(game, turn, transfer, done)
     end)
 end
 
--- The player gives: confirm, apply, and tell the model what happened (with vanilla's reaction) before the reply
-local function give(game, turn, params)
+M.applyTransfer = applyTransfer
+
+-- Whether giving this item to the NPC is part of a vanilla quest (a handover line in their dialogue)
+local function isQuestHandover(game, turn, transfer)
+    local ok, found = pcall(handover.find, turn.npc, game.player, transfer.item, game.locals(turn.npc), transfer.count)
+    return ok and found ~= nil
+end
+
+-- A plain gift: apply it, and tell the model what happened (with vanilla's reaction) before the reply
+local function giveNow(game, turn, transfer)
+    applyTransfer(game, turn, transfer, function(result, given, rewards, effects)
+        if result.ok then
+            -- This turn's exchange is settled: no after-reply checks
+            turn.settled = true
+            game.happened(turn, string.format('The stranger has just handed %s %s.', turn.npcName, given))
+            if effects and effects.text then
+                game.happened(turn, string.format('In the original story, %s reacts like this: "%s"', turn.npcName,
+                    game.expand(effects.text, turn.npc)))
+            end
+            if #rewards > 0 then
+                game.happened(turn, string.format('%s has given the stranger a reward: %s.', turn.npcName,
+                    table.concat(rewards, ', ')))
+            end
+        end
+        game.continueTurn(turn)
+    end)
+end
+
+-- The player hands something over (the give and bribe intents): the player chooses before the reply. Gold with no
+-- quest behind it can also be offered as a bribe, so the player decides, not the model: "Give 50 Gold",
+-- "Bribe with 50 Gold", "Keep it", with the one the model guessed first.
+-- @param asBribe true if the model took the line as a bribe
+function M.offer(game, turn, params, asBribe)
     local transfer = params.transfer
-    useQuestAmount(game, turn, transfer, params.candidates)
+    useQuestAmount(game, turn, transfer, params.candidates or {})
     local label = itemLabel(transfer.name or transfer.item, transfer.count)
-    game.choices(turn, 'before', {
-        { id = 'yes', label = game.l10n('giveChoice', { item = label }) },
-        { id = 'no', label = game.l10n('keepChoice') },
-    }, function(choiceId)
-        if choiceId ~= 'yes' then
+    local giveOption = { id = 'give', label = game.l10n('giveChoice', { item = label }) }
+    local choices = { giveOption }
+    if transfer.item == check.GOLD_ID and not isQuestHandover(game, turn, transfer) then
+        local bribeOption = { id = 'bribe', label = game.l10n('bribeChoice', { item = label }) }
+        choices = asBribe and { bribeOption, giveOption } or { giveOption, bribeOption }
+    end
+    choices[#choices + 1] = { id = 'no', label = game.l10n('keepChoice') }
+    game.choices(turn, 'before', choices, function(choiceId)
+        if choiceId == 'give' then
+            giveNow(game, turn, transfer)
+        elseif choiceId == 'bribe' then
+            -- Loaded here: persuade.lua requires this module
+            require('scripts.llm.actions.persuade').bribe(game, turn, transfer, label)
+        else
             game.happened(turn, string.format('The stranger offered %s %s, but then thought better of it and kept it.',
                 turn.npcName, label))
             game.continueTurn(turn)
-            return
         end
-        applyTransfer(game, turn, transfer, function(result, given, rewards, effects)
-            if result.ok then
-                -- This turn's exchange is settled: no after-reply checks
-                turn.settled = true
-                game.happened(turn, string.format('The stranger has just handed %s %s.', turn.npcName, given))
-                if effects and effects.text then
-                    game.happened(turn, string.format('In the original story, %s reacts like this: "%s"', turn.npcName,
-                        game.expand(effects.text, turn.npc)))
-                end
-                if #rewards > 0 then
-                    game.happened(turn, string.format('%s has given the stranger a reward: %s.', turn.npcName,
-                        table.concat(rewards, ', ')))
-                end
-            end
-            game.continueTurn(turn)
-        end)
     end)
     return 'paused'
 end
@@ -162,7 +189,8 @@ M.intents = {
         params = { 'item', 'count' },
         describe = function(ctx)
             return ctx.playerName .. ' hands one of their items or gold to ' .. ctx.npcName .. ' now ("here, take it", '
-                .. '"have some gold", "here is the money you asked for").'
+                .. '"have some gold", "here is the money you asked for"), including paying a price or a debt. Gold '
+                .. 'handed over to buy favour, help or silence is bribe, not give.'
         end,
         available = function(ctx)
             return #ctx.candidates > 0
@@ -171,7 +199,9 @@ M.intents = {
             local transfer = check.transfer(answer, ctx.candidates, check.PLAYER_GIVES)
             return transfer and { transfer = transfer, candidates = ctx.candidates } or nil
         end,
-        run = give,
+        run = function(game, turn, params)
+            return M.offer(game, turn, params, false)
+        end,
     },
 }
 

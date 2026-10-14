@@ -5,7 +5,7 @@
 
 local M = {}
 
-M.TYPES = { admire = 'admire', intimidate = 'intimidate', taunt = 'taunt' }
+M.TYPES = { admire = 'admire', intimidate = 'intimidate', taunt = 'taunt', bribe = 'bribe' }
 
 -- Vanilla values from Morrowind.esm, used when a GMST can't be read
 M.DEFAULT_GMST = {
@@ -22,6 +22,9 @@ M.DEFAULT_GMST = {
     fFightDispMult = 0.2,
     iFightDistanceBase = 20,
     fFightDistanceMultiplier = 0.005,
+    fBribe10Mod = 35,
+    fBribe100Mod = 75,
+    fBribe1000Mod = 150,
 }
 
 -- C++ int() truncates toward zero
@@ -36,8 +39,8 @@ function M.fatigueTerm(stats, g)
     return g.fFatigueBase - g.fFatigueMult * (1 - normalised)
 end
 
--- getPersuasionRatings: rating1 and rating2 (rating3 is only used for bribes)
--- @param stats { speechcraft, personality, luck, reputation, level, fatigueCurrent, fatigueMax }
+-- getPersuasionRatings: rating1, rating2, and rating3 (only used for bribes)
+-- @param stats { speechcraft, mercantile, personality, luck, reputation, level, fatigueCurrent, fatigueMax }
 function M.ratings(stats, isPlayer, g)
     local persTerm = stats.personality / g.fPersonalityMod
     local luckTerm = stats.luck / g.fLuckMod
@@ -45,24 +48,47 @@ function M.ratings(stats, isPlayer, g)
     local fatigue = M.fatigueTerm(stats, g)
     local levelTerm = stats.level * g.fLevelMod
     local rating1 = (repTerm + luckTerm + persTerm + stats.speechcraft) * fatigue
-    local rating2
+    local rating2, rating3
+    local mercantile = stats.mercantile or 0
     if isPlayer then
         rating2 = rating1 + levelTerm
+        rating3 = (mercantile + luckTerm + persTerm) * fatigue
     else
         rating2 = (levelTerm + repTerm + luckTerm + persTerm + stats.speechcraft) * fatigue
+        rating3 = (mercantile + repTerm + luckTerm + persTerm) * fatigue
     end
-    return rating1, rating2
+    return rating1, rating2, rating3
+end
+
+-- The bribe bonus for any amount. Vanilla only offers 10, 100 and 1000 gold (fBribe10Mod, fBribe100Mod,
+-- fBribe1000Mod); other amounts are interpolated on a log scale between those, scaled down linearly below 10 and
+-- capped at 1000, so the three vanilla amounts give exactly vanilla's result.
+function M.bribeMod(amount, gmst)
+    local g = gmst or M.DEFAULT_GMST
+    if amount <= 0 then
+        return 0
+    elseif amount < 10 then
+        return g.fBribe10Mod * amount / 10
+    elseif amount >= 1000 then
+        return g.fBribe1000Mod
+    end
+    local scale = math.log10(amount)
+    if scale <= 2 then
+        return g.fBribe10Mod + (g.fBribe100Mod - g.fBribe10Mod) * (scale - 1)
+    end
+    return g.fBribe100Mod + (g.fBribe1000Mod - g.fBribe100Mod) * (scale - 2)
 end
 
 -- @param kind M.TYPES value
 -- @param disposition the NPC's current (derived) disposition, 0-100
 -- @param roll 0-99
+-- @param amount gold offered, for bribes
 -- @return { success = bool, temp = int, perm = int, fight = int, flee = int }: temp applies during the conversation,
 --         perm afterwards; fight and flee are the changes to the NPC's AI ratings (vanilla Taunt and Intimidate)
-function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
+function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst, amount)
     local g = gmst or M.DEFAULT_GMST
-    local npc1, npc2 = M.ratings(npcStats, false, g)
-    local pl1, pl2 = M.ratings(playerStats, true, g)
+    local npc1, npc2, npc3 = M.ratings(npcStats, false, g)
+    local pl1, pl2, pl3 = M.ratings(playerStats, true, g)
 
     local d = 1 - 0.02 * math.abs(disposition - 50)
     local target1 = d * (pl1 - npc1 + 50)
@@ -114,6 +140,11 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst)
         if success and math.abs(x) < minChange then
             x = -minChange
         end
+    elseif kind == M.TYPES.bribe then
+        local target3 = math.max(minChance, d * (pl3 - npc3 + 50) + M.bribeMod(amount or 0, g))
+        success = roll <= target3
+        local c = math.floor((target3 - roll) * dieMult)
+        x = success and math.max(minChange, c) or c
     else
         error('unknown persuasion type ' .. tostring(kind))
     end
