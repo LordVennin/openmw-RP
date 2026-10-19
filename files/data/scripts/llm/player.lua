@@ -61,6 +61,16 @@ local conversation = nil
 local followerStates = {}
 -- NPCs who refuse to talk to the player until a game time: npc id -> game time (seconds)
 local blocked = {}
+-- The same NPCs as game objects: the engine refuses their conversations itself (openmw.llm.setTalkRefusal), so the
+-- dialogue window never opens. Its list is cleared with the game, so it is set again after loading.
+local blockedNpcs = {}
+local resendRefusals = false
+
+local function refuseToTalk(npc, untilTime)
+    blocked[npc.id] = untilTime
+    blockedNpcs[npc.id] = npc
+    llm.setTalkRefusal(npc, untilTime, l10n('refusesToTalk', { name = types.NPC.record(npc).name }))
+end
 -- Whether the NPC ended the AI conversation in the open dialogue window
 local chatEnded = false
 -- Memory summaries: NPCs with a summary request in flight, and results waiting for their window to close
@@ -539,7 +549,7 @@ local function endChat(turn, reason)
     local refusal = REFUSAL_HOURS[generalSettings:get('refusalDuration')] or REFUSAL_HOURS.normal
     local hours = reason == 'attack' and refusal.attack or refusal.chat
     if hours > 0 then
-        blocked[turn.npc.id] = core.getGameTime() + hours * 3600
+        refuseToTalk(turn.npc, core.getGameTime() + hours * 3600)
     end
     local event = reason == 'attack' and '%s lost their temper and attacked the stranger.'
         or '%s angrily ended a conversation with the stranger.'
@@ -929,6 +939,7 @@ local function onUiModeChanged(data)
         end
         if freshWindow and dialogueNpc then
             chatEnded = false
+            -- Normally the engine already refused the conversation; this covers saves from before it could
             local refusedUntil = blocked[dialogueNpc.id]
             if refusedUntil and core.getGameTime() < refusedUntil then
                 ui.showMessage(l10n('refusesToTalk', { name = types.NPC.record(dialogueNpc).name }))
@@ -937,6 +948,7 @@ local function onUiModeChanged(data)
                 return
             end
             blocked[dialogueNpc.id] = nil
+            blockedNpcs[dialogueNpc.id] = nil
             -- A fresh dialogue window starts with an empty history; everything saved so far can be recalled
             recalled = false
             local history = histories[dialogueNpc.id]
@@ -1029,13 +1041,14 @@ local function onSave()
         }
     end
     local now = core.getGameTime()
-    local stillBlocked = {}
+    local stillBlocked, stillBlockedNpcs = {}, {}
     for id, untilTime in pairs(blocked) do
         if untilTime > now then
             stillBlocked[id] = untilTime
+            stillBlockedNpcs[id] = blockedNpcs[id]
         end
     end
-    return { version = SAVE_VERSION, histories = saved, blocked = stillBlocked }
+    return { version = SAVE_VERSION, histories = saved, blocked = stillBlocked, blockedNpcs = stillBlockedNpcs }
 end
 
 local function onLoad(data)
@@ -1044,6 +1057,8 @@ local function onLoad(data)
         histories = data.histories
     end
     blocked = (data and data.blocked) or {}
+    blockedNpcs = (data and data.blockedNpcs) or {}
+    resendRefusals = true
 end
 
 return {
@@ -1064,6 +1079,14 @@ return {
         onLoad = onLoad,
         -- Runs while the game is paused in dialogue: enables the text box once the server is ready
         onFrame = function()
+            if resendRefusals then
+                resendRefusals = false
+                for id, npc in pairs(blockedNpcs) do
+                    if blocked[id] and npc:isValid() then
+                        llm.setTalkRefusal(npc, blocked[id], l10n('refusesToTalk', { name = types.NPC.record(npc).name }))
+                    end
+                end
+            end
             if waitingForServer and dialogueNpc and not pending and not serverHint() then
                 setInput(true)
             end

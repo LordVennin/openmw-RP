@@ -194,6 +194,10 @@ namespace MWBase
             = 0;
 
         virtual std::string formatResourceUsageStats() const = 0;
+
+        // AI dialogue (openmw.llm): the message shown instead of a conversation when an NPC refuses to talk to the
+        // player, or nullptr. Checked where activating an NPC would start a conversation.
+        virtual const std::string* talkRefusal(const MWWorld::Ptr& actor) const = 0;
     };
 
 }

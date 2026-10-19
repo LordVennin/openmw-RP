@@ -427,8 +427,24 @@ namespace MWLua
         mTeleportPlayerAction.reset();
     }
 
+    void LuaManager::setTalkRefusal(ESM::RefNum npc, double untilGameTime, std::string message)
+    {
+        mTalkRefusals[npc] = { untilGameTime, std::move(message) };
+    }
+
+    const std::string* LuaManager::talkRefusal(const MWWorld::Ptr& actor) const
+    {
+        auto it = mTalkRefusals.find(actor.getCellRef().getRefNum());
+        if (it == mTalkRefusals.end())
+            return nullptr;
+        if (MWBase::Environment::get().getWorld()->getTimeManager()->getGameTime() >= it->second.first)
+            return nullptr;
+        return &it->second.second;
+    }
+
     void LuaManager::clear()
     {
+        mTalkRefusals.clear();
         mLlmClient->cancelAll();
         mActionQueue.clear();
         mTeleportPlayerAction.reset();

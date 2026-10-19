@@ -162,7 +162,7 @@ Notices mark each change.
 
 Ending the talk is not certain: before each reply from an upset NPC, and when disposition falls to 20, the player's way with words is rolled. The chance is vanilla's persuasion rating1 (Speechcraft, Personality, Luck, Reputation) against the NPC's, plus 50, kept between 5% and 95% (`persuasion.patienceChance`). On success the model is told the NPC is angry but still willing to talk, and they don't walk off this turn. Attacks are unaffected.
 
-The player then sees a notice and a single Goodbye choice. The NPC refuses to talk for 24 game hours (72 after an attack), saved with the game.
+The player then sees a notice and a single Goodbye choice. The NPC refuses to talk for 24 game hours (72 after an attack), saved with the game. The engine enforces it (`openmw.llm.setTalkRefusal`, checked in `Npc::activate` where vanilla would start a conversation). Activating the NPC shows "X refuses to talk to you." in a vanilla message box, as "in combat" does, and the dialogue window never opens. Looting, pickpocketing and combat are unaffected. The list is cleared with the game, and the script sets it again after a load.
 
 **Memory:** when a window closes on a history longer than 16 turns, everything but the last 8 turns is summarized in the background, merged with any earlier summary. The summary is saved, given to the model as `[What X remembers]` within its own budget share, and shown first in Recall.
 

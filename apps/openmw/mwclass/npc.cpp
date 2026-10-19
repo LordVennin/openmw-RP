@@ -834,7 +834,15 @@ namespace MWClass
 
             const bool allowTalking = !inCombatWithActor && !getNpcStats(ptr).isWerewolf();
             if (allowTalking)
+            {
+                // AI dialogue: an NPC who ended a conversation refuses to talk for a while (openmw.llm.setTalkRefusal)
+                if (actor == MWMechanics::getPlayer())
+                {
+                    if (const std::string* refusal = MWBase::Environment::get().getLuaManager()->talkRefusal(ptr))
+                        return std::make_unique<MWWorld::FailedAction>(*refusal);
+                }
                 return std::make_unique<MWWorld::ActionTalk>(ptr);
+            }
         }
 
         if (inCombatWithActor)

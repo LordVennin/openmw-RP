@@ -200,6 +200,12 @@ namespace MWLua
         // Null until startLlmServer() is called
         const LlmServer* llmServer() const { return mLlmServer.get(); }
 
+        // NPCs that refuse to talk to the player until a game time (seconds, as core.getGameTime()), with the message
+        // shown instead. Main thread only. Cleared with the game; the AI dialogue script sets them again after a load.
+        void setTalkRefusal(ESM::RefNum npc, double untilGameTime, std::string message);
+        void clearTalkRefusal(ESM::RefNum npc) { mTalkRefusals.erase(npc); }
+        const std::string* talkRefusal(const MWWorld::Ptr& actor) const override;
+
         bool isProcessingInputEvents() const { return mProcessingInputEvents; }
 
         void reportStats(unsigned int frameNumber, osg::Stats& stats) const;
@@ -288,6 +294,8 @@ namespace MWLua
         LuaUtil::InputTrigger::Registry mInputTriggers;
 
         LuaUtil::ScriptTracker mScriptTracker;
+
+        std::map<ESM::RefNum, std::pair<double, std::string>> mTalkRefusals;
 
         // Stopped after the client, which sends requests to its port
         std::unique_ptr<LlmServer> mLlmServer;

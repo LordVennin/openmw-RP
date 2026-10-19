@@ -205,6 +205,22 @@ namespace MWLua
             return MWBase::Environment::get().getDialogueManager()->isTopicKnown(ESM::RefId::deserializeText(topicId));
         };
 
+        // An NPC who refuses to talk to the player until a game time (core.getGameTime() seconds): activating them
+        // shows `message` instead of opening the dialogue window. nil untilGameTime lifts it.
+        api["setTalkRefusal"] = [context](const Object& npc, sol::optional<double> untilGameTime,
+                                    sol::optional<std::string> message) {
+            ESM::RefNum refNum = npc.ptr().getCellRef().getRefNum();
+            LuaManager* manager = context.mLuaManager;
+            manager->addAction(
+                [manager, refNum, untilGameTime, message = message.value_or(std::string())] {
+                    if (untilGameTime.has_value())
+                        manager->setTalkRefusal(refNum, *untilGameTime, message);
+                    else
+                        manager->clearTalkRefusal(refNum);
+                },
+                "setTalkRefusalAction");
+        };
+
         api["setDialogueBusy"] = [context](bool busy) {
             context.mLuaManager->addAction(
                 [busy] {
