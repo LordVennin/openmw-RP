@@ -185,6 +185,9 @@ namespace MWGui
         void setLiveResponse(std::string_view text);
         void endLiveResponse();
 
+        /// After topics were learned outside a vanilla response: refreshes the topic list and the history's topic links
+        void refreshTopics();
+
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
 

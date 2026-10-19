@@ -14,6 +14,7 @@ local ui = require('openmw.ui')
 local budget = require('scripts.llm.budget')
 local cards = require('scripts.llm.cards')
 local check = require('scripts.llm.actions.check')
+local directions = require('scripts.llm.directions')
 local generated = require('scripts.llm.generated')
 local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
@@ -643,6 +644,8 @@ local function onReply(id, response)
     else
         llm.addDialogueResponse(reply)
     end
+    -- Like vanilla responses: topics the NPC names and has an answer for become known
+    llm.addTopicsFromText(reply)
 
     if turn.endReason then
         -- Decided before the reply (about to attack, or fed up): the reply played it out
@@ -706,6 +709,13 @@ startReply = function(turn)
     local sceneNote = scene.build(npc, self.object, advancedSettings:get('sceneDetail') or 'full', limits)
     if sceneNote then
         notes[#notes + 1] = sceneNote
+    end
+    -- Real directions when the stranger asks the way
+    local okWay, wayNote = pcall(directions.build, npc, self.object, userText)
+    if okWay and wayNote then
+        notes[#notes + 1] = wayNote
+    elseif not okWay then
+        print('LLM directions: ' .. tostring(wayNote))
     end
     -- Vanilla topic answers for topics mentioned in the player's line or the NPC's last line
     local lastNpcLine = npcLastLine(history) or ''
@@ -954,7 +964,19 @@ local function onDialogueResponse(e)
     if e.type == 'greeting' then
         history.greeting = text
     elseif e.type == 'topic' then
-        -- Vanilla topic answers become context, as if the player had asked about the topic
+        -- Vanilla topic answers become context, as if the player had asked about the topic. Clicking a topic again
+        -- moves its answer to the end instead of repeating it, so repeated clicks don't push the conversation out.
+        for i = #history.turns - 1, 1, -1 do
+            local asked, answer = history.turns[i], history.turns[i + 1]
+            if asked.role == 'user' and asked.topic == record.name and answer.role == 'model' and answer.text == text then
+                table.remove(history.turns, i + 1)
+                table.remove(history.turns, i)
+                if dialogueNpc == e.actor and i <= earlierTurns then
+                    earlierTurns = earlierTurns - 2 -- the copy was part of the earlier conversation shown by Recall
+                end
+                break
+            end
+        end
         table.insert(history.turns, { role = 'user', text = 'Tell me about ' .. record.name .. '.', topic = record.name })
         table.insert(history.turns, { role = 'model', text = text })
     end

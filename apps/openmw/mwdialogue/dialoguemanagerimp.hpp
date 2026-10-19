@@ -65,7 +65,7 @@ namespace MWDialogue
 
         const MWDialogue::KeywordSearch& getKeywordSearch() const;
         std::vector<ESM::RefId> parseTopicIdsFromText(const std::string& text) const;
-        void addTopicsFromText(const std::string& text);
+        void addTopicsFromText(const std::string& text) override;
 
         void updateActorKnownTopics();
         void updateGlobals();

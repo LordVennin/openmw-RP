@@ -87,7 +87,9 @@ Make "build unmodified OpenMW from source" phase zero: the codebase is large C++
   - [x] vanilla service gates (guild membership and rank, refusals) checked by the engine
   - [x] streaming replies, as an option in the settings (off by default)
   - [x] bribes
-  - [ ] more actions on the registry (bounties, topics, directions)
+  - [x] learning topics from AI replies (vanilla's rule, run by the engine)
+  - [x] directions to real places and people in the area
+  - [ ] more actions on the registry (bounties, joining factions)
 - [ ] Character content: more cards and lore. Secret memberships (e.g. Blades trainers) must stay secret: the `[Scene]` note currently lists every faction the NPC belongs to, so cards or a secret-faction list need to tell the model to hide them.
 
 Phases 2.5 and 3.5 come from [DISTRIBUTION.md](DISTRIBUTION.md), which covers bundling llama-server and the launcher AI tab.
@@ -188,6 +190,12 @@ Fewer options make the classifier more accurate. `player.lua` gives actions a sm
 - **Changes:** disposition changes like the other persuasion types (temporary while talking, then the permanent part), and Speechcraft trains.
 - **The reply:** the model is told whether the NPC accepted.
 - **Live test:** with "keep this between us" bribe lines and "the gold you asked for" give lines, 36 of 38 player lines were classified right (the two old borderline misses).
+
+**Learning topics:** after each AI reply, `openmw.llm.addTopicsFromText` runs the engine's own `DialogueManager::addTopicsFromText`. Topics named in the reply that this NPC has a vanilla answer for become known, and the topic list and links refresh, as with vanilla responses. The model can't invent topics; naming a topic only teaches it if the NPC really knows it.
+
+**Directions** (`scripts/llm/directions.lua`): when the player asks the way ("where", "how do I get", "find"...), the doors in the active cells (by destination, e.g. "Seyda Neen, Arrille's Tradehouse") and the living NPCs whose names match the question go into a `[Directions]` note. Each gets a compass direction and a town-scale distance from the NPC, for example "Arrille's Tradehouse: the door is a short walk away to the north-west". Generic words like "house" alone don't match a place. Each match also names the nearest other building within 30 m as a real landmark, and the model is told not to invent others: it once sent the player "past the well" in Seyda Neen, which has none. At most 3 matches are listed. Places outside the area are still covered by vanilla topic answers and the lorebook.
+
+**Vanilla topic clicks** become "Tell me about X" turns in the AI history. Clicking a topic again moves its answer to the end instead of repeating it, so repeated clicks don't fill the history budget or push the conversation out.
 
 **Streaming replies** (the Stream Replies setting, off by default): the reply request asks llama-server to stream, and `llm.request(..., { stream = callback })` reads the server-sent events on the worker thread. Each frame, the callback gets the new event payloads, always before the request's final callback. The reply grows in the dialogue window through `llm.setDialogueResponse`, at most every 0.1 s. Each update is sanitized like the final reply, so speaker names and special tokens never flash on screen. The finished, trimmed reply then replaces it. Only the reply streams; the action checks are short JSON answers. If the server fails midway, the partial text stays visible but isn't remembered.
 

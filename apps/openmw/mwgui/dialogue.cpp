@@ -897,6 +897,12 @@ namespace MWGui
         mLiveResponse.reset();
     }
 
+    void DialogueWindow::refreshTopics()
+    {
+        updateTopics();
+        updateHistory();
+    }
+
         void DialogueWindow::setLuaBusy(bool busy)
     {
         if (mLuaBusy == busy)

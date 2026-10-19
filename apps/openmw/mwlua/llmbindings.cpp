@@ -13,6 +13,7 @@
 #include <components/lua/luastate.hpp>
 #include <components/settings/values.hpp>
 
+#include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwdialogue/filter.hpp"
 #include "../mwmechanics/creaturestats.hpp"
@@ -182,6 +183,20 @@ namespace MWLua
                         windowManager->getDialogueWindow()->endLiveResponse();
                 },
                 "endDialogueResponseAction");
+        };
+
+        // Vanilla's topic learning for text the NPC said (an AI reply): topics named in it that the NPC in the open
+        // dialogue has an answer for become known, as with vanilla responses
+        api["addTopicsFromText"] = [context](std::string text) {
+            context.mLuaManager->addAction(
+                [text = std::move(text)] {
+                    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+                    if (!windowManager->containsMode(MWGui::GM_Dialogue))
+                        return;
+                    MWBase::Environment::get().getDialogueManager()->addTopicsFromText(text);
+                    windowManager->getDialogueWindow()->refreshTopics();
+                },
+                "addTopicsFromTextAction");
         };
 
         api["setDialogueBusy"] = [context](bool busy) {

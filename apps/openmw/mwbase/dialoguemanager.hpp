@@ -59,6 +59,10 @@ namespace MWBase
 
         virtual void addTopic(const ESM::RefId& topic) = 0;
 
+        /// Adds the topics named in `text` that the current dialogue actor has an answer for, as vanilla does for
+        /// each response it shows
+        virtual void addTopicsFromText(const std::string& text) = 0;
+
         virtual void addChoice(std::string_view text, int choice) = 0;
         virtual const std::vector<std::pair<std::string, int>>& getChoices() const = 0;
 

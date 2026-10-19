@@ -134,6 +134,7 @@ set(BUILTIN_DATA_FILES
     scripts/llm/actions/service.lua
     scripts/llm/budget.lua
     scripts/llm/cards.lua
+    scripts/llm/directions.lua
     scripts/llm/followers.lua
     scripts/llm/generated.lua
     scripts/llm/global.lua
