@@ -153,12 +153,14 @@ The reply comes first, then "Take X along" / "Never mind". `global.lua` keeps a 
 
 Notices mark each change.
 
-**Knowledge:** an NPC's own topic and their personal topics are always known, alongside mentioned topics, within one shared budget. `Local` conditions are evaluated from a snapshot of the NPC's script variables.
+**Knowledge:** an NPC's own topic and their personal topics are always known, alongside mentioned topics, within one shared budget. Lines written for this NPC alone (secrets, confessions) only reach the model once the player knows the topic (`openmw.llm.isTopicKnown`), as in vanilla, where such a line can only be heard by clicking a learned topic. Foryn Gilnith no longer confesses before the tax-murder quest; general lines for a topic are still used. `Local` conditions are evaluated from a snapshot of the NPC's script variables.
 
-**Hostility and ending the conversation:** Taunt and Intimidate change the NPC's Fight and Flee as in vanilla, through `npc.lua`, a CUSTOM script attached to the NPC (Fight can only be written by a script on the NPC itself). After each attempt, Lua computes the engine's fight term (`getFightTerm`): at 100 or more the NPC attacks, and from 80 they threaten the player. The model is told which, and can't start a fight on its own. The chat ends:
+**Hostility and ending the conversation:** Taunt and Intimidate change the NPC's Fight and Flee as in vanilla, through `npc.lua`, a CUSTOM script attached to the NPC (Fight can only be written by a script on the NPC itself). After each attempt, Lua computes the engine's fight term (`getFightTerm`): at 100 or more the NPC attacks, and from 80 they threaten the player. The model is told which, and can't start a fight on its own. Fights are the game's: after a taunt, the note tells the model to answer with words and the NPC's own small gestures, never touching, grabbing or striking the stranger or describing what they do. Other replies are unaffected. An attacking NPC gets "a few furious words only". In a live test of 8 replies to a taunt that ends in an attack, the old wording had the NPC grab the stranger by the collar; the new one kept every reply to words and clenched fists. The chat ends:
 - when the NPC attacks (the engine AI takes over once the window closes);
 - when disposition falls to 20 or less;
 - when an upset NPC's reply walks away (an evidence check, plus detection of actions like *walks away*).
+
+Ending the talk is not certain: before each reply from an upset NPC, and when disposition falls to 20, the player's way with words is rolled. The chance is vanilla's persuasion rating1 (Speechcraft, Personality, Luck, Reputation) against the NPC's, plus 50, kept between 5% and 95% (`persuasion.patienceChance`). On success the model is told the NPC is angry but still willing to talk, and they don't walk off this turn. Attacks are unaffected.
 
 The player then sees a notice and a single Goodbye choice. The NPC refuses to talk for 24 game hours (72 after an attack), saved with the game.
 

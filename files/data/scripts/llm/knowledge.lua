@@ -243,15 +243,27 @@ function M.infoPasses(info, ctx)
     return true
 end
 
--- The first response to `topicId` that this NPC would give, or nil
+-- The first response to `topicId` that this NPC would give, or nil.
+-- With ctx.knowsTopic, lines written for this NPC only are skipped while the player doesn't know the topic: in vanilla
+-- such a line (a secret, a confession) can only be heard by clicking a topic the player has already learned.
 function M.responseFor(topicId, ctx)
     local record = core.dialogue.topic.records[topicId]
     if not record then
         return nil
     end
+    local known = nil
     for _, info in ipairs(record.infos) do
         if info.text and info.text ~= '' and M.infoPasses(info, ctx) then
-            return info.text
+            if not (ctx.knowsTopic and info.filterActorId) then
+                return info.text
+            end
+            if known == nil then
+                local ok, result = pcall(ctx.knowsTopic, topicId)
+                known = ok and result == true
+            end
+            if known then
+                return info.text
+            end
         end
     end
     return nil
@@ -279,9 +291,11 @@ end
 -- @param expand function(text) -> text expanding vanilla macros (%PCName...)
 -- @param limits table from budget.fromContextSize
 -- @param locals the speaker's mwscript variables, or nil
+-- @param knowsTopic function(topicId) -> whether the player knows the topic (openmw.llm.isTopicKnown), or nil
 -- @return the "[Knowledge]" note, or nil
-function M.build(npc, player, texts, expand, limits, locals)
+function M.build(npc, player, texts, expand, limits, locals, knowsTopic)
     local ctx = M.newContext(npc, player, locals, false)
+    ctx.knowsTopic = knowsTopic
 
     -- Candidate topics in priority order: own topic, mentioned topics, other personal topics
     local npcName = ctx.npcRecord.name:lower()

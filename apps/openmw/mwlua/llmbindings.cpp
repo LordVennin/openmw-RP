@@ -199,6 +199,12 @@ namespace MWLua
                 "addTopicsFromTextAction");
         };
 
+        // Whether the player knows a topic, the gate vanilla puts on lines written for one NPC: a topic can only be
+        // asked about once it's known
+        api["isTopicKnown"] = [](std::string_view topicId) {
+            return MWBase::Environment::get().getDialogueManager()->isTopicKnown(ESM::RefId::deserializeText(topicId));
+        };
+
         api["setDialogueBusy"] = [context](bool busy) {
             context.mLuaManager->addAction(
                 [busy] {

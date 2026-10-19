@@ -168,6 +168,16 @@ function M.attempt(kind, playerStats, npcStats, disposition, roll, gmst, amount)
     return { success = success, temp = temp, perm = perm, fight = fight, flee = flee }
 end
 
+-- How likely the stranger's way with words keeps an upset NPC talking, in percent: vanilla's persuasion rating1
+-- (Speechcraft, Personality, Luck, Reputation, fatigue) against the NPC's, as for admire but without the disposition
+-- factor, since the NPC is already angry. Vanilla never ends a conversation, so this is the mod's own rule.
+function M.patienceChance(playerStats, npcStats, gmst)
+    local g = gmst or M.DEFAULT_GMST
+    local player1 = M.ratings(playerStats, true, g)
+    local npc1 = M.ratings(npcStats, false, g)
+    return math.max(g.iPerMinChance, math.min(95, player1 - npc1 + 50))
+end
+
 -- The engine's aggression rule (getFightTerm in apps/openmw/mwmechanics/combat.cpp): at 100 or more the NPC attacks.
 -- @param fight the NPC's Fight rating (modified)
 -- @param distance distance to the player in game units

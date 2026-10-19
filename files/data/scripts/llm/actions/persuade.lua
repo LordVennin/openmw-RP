@@ -70,8 +70,9 @@ local function persuade(game, turn, kind, offer)
     end
     local disposition = types.NPC.getDisposition(npc, player)
     local gmst = gmstValues()
-    local result = persuasion.attempt(kind, persuasionStats(player), persuasionStats(npc), disposition,
-        math.random(0, 99), gmst, offer and offer.count)
+    local playerStats, npcStats = persuasionStats(player), persuasionStats(npc)
+    local result = persuasion.attempt(kind, playerStats, npcStats, disposition, math.random(0, 99), gmst,
+        offer and offer.count)
     if not convo.originalBase then
         convo.originalBase = types.NPC.getBaseDisposition(npc, player)
     end
@@ -105,12 +106,27 @@ local function persuade(game, turn, kind, offer)
     local term = persuasion.fightTerm(fight, math.sqrt(dx * dx + dy * dy), dispositionAfter, gmst)
     if term >= persuasion.ATTACK_THRESHOLD then
         turn.endReason = 'attack'
-        line = line .. string.format(' %s loses their temper and attacks the stranger.', turn.npcName)
+        line = line .. string.format(' %s loses their temper and will attack the stranger once they stop talking: '
+            .. 'a few furious words only, the fight itself happens in the game.', turn.npcName)
     elseif term >= persuasion.THREATENING_THRESHOLD then
-        line = line .. string.format(' %s is barely holding back from violence and threatens the stranger.', turn.npcName)
+        line = line .. string.format(' %s is barely holding back from violence and threatens the stranger, in words.',
+            turn.npcName)
     elseif dispositionAfter <= 20 then
-        turn.endReason = 'fedUp'
-        line = line .. string.format(' %s has had enough of the stranger and ends the conversation.', turn.npcName)
+        -- Fed up: a smooth talker may still keep them in the conversation (this is the turn's patience roll)
+        turn.patienceRolled = true
+        if math.random(0, 99) < persuasion.patienceChance(playerStats, npcStats, gmst) then
+            turn.patient = true
+            line = line .. string.format(" %s has nearly had enough of the stranger, but the stranger's way with words "
+                .. 'keeps them talking, for now.', turn.npcName)
+        else
+            turn.endReason = 'fedUp'
+            line = line .. string.format(' %s has had enough of the stranger and ends the conversation.', turn.npcName)
+        end
+    end
+    if kind == persuasion.TYPES.taunt then
+        -- Insults make the model narrate scuffles; the game plays out any fight itself
+        line = line .. string.format(' %s answers with words and small gestures of their own: they do not touch, grab '
+            .. 'or strike the stranger, and do not describe what the stranger does.', turn.npcName)
     end
     print(string.format('LLM persuasion: %s %s -> %s, temporary %+d, permanent %+d, fight %+d, fight term %d', kind,
         npc.recordId, result.success and 'success' or 'failure', result.temp, result.perm, result.fight, term))
@@ -142,6 +158,15 @@ function M.bribe(game, turn, transfer, label)
         noQuestEffects = true,
         event = string.format('The stranger bribed %s with %s.', turn.npcName, label),
     })
+end
+
+-- Whether an upset NPC stays in the conversation this turn, rolled with the player's Speechcraft and Personality
+-- (persuasion.patienceChance)
+function M.keepsTalking(game, npc)
+    local chance = persuasion.patienceChance(persuasionStats(game.player), persuasionStats(npc), gmstValues())
+    local roll = math.random(0, 99)
+    print(string.format('LLM patience: %s, chance %d, roll %d', npc.recordId, chance, roll))
+    return roll < chance
 end
 
 local function entry(kind, describe)

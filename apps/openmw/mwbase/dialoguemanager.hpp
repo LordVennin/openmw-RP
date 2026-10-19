@@ -63,6 +63,9 @@ namespace MWBase
         /// each response it shows
         virtual void addTopicsFromText(const std::string& text) = 0;
 
+        /// Whether the player knows the topic (it would show in a topic list)
+        virtual bool isTopicKnown(const ESM::RefId& topic) const = 0;
+
         virtual void addChoice(std::string_view text, int choice) = 0;
         virtual const std::vector<std::pair<std::string, int>>& getChoices() const = 0;
 

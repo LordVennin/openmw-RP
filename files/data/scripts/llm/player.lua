@@ -20,6 +20,7 @@ local json = require('scripts.llm.json')
 local knowledge = require('scripts.llm.knowledge')
 local lorebook = require('scripts.llm.lorebook')
 local memory = require('scripts.llm.memory')
+local persuade = require('scripts.llm.actions.persuade')
 local prompt = require('scripts.llm.prompt')
 local registry = require('scripts.llm.actions.registry')
 local sanitize = require('scripts.llm.sanitize')
@@ -650,7 +651,7 @@ local function onReply(id, response)
     if turn.endReason then
         -- Decided before the reply (about to attack, or fed up): the reply played it out
         endChat(turn, turn.endReason)
-    elseif isUpset(turn) and check.actionExit(reply) then
+    elseif isUpset(turn) and not turn.patient and check.actionExit(reply) then
         endChat(turn, 'leaves')
     elseif turn.afterChoices then
         -- An action decided before the reply (the NPC agreed to come along, to trade...): now the player chooses
@@ -658,7 +659,7 @@ local function onReply(id, response)
     elseif turn.settled then
         -- A handover before the reply already settled this turn's exchange
         finishTurn()
-    elseif isUpset(turn) then
+    elseif isUpset(turn) and not turn.patient then
         local okCheck, started = pcall(startLeaveCheck, turn, reply)
         if not okCheck then
             print('LLM leave check: ' .. tostring(started))
@@ -687,6 +688,17 @@ end
 
 startReply = function(turn)
     local npc = turn.npc
+    -- An upset NPC may walk off after this reply; once per turn, the player's way with words can keep them talking
+    if not turn.endReason and not turn.patienceRolled and isUpset(turn) then
+        turn.patienceRolled = true
+        local okRoll, keeps = pcall(persuade.keepsTalking, game, npc)
+        if okRoll and keeps then
+            turn.patient = true
+            game.happened(turn, string.format('%s is angry with the stranger, but still willing to talk.', turn.npcName))
+        elseif not okRoll then
+            print('LLM patience: ' .. tostring(keeps))
+        end
+    end
     local npcName = turn.npcName
     local userText = turn.userText
     local userName = playerName()
@@ -721,7 +733,7 @@ startReply = function(turn)
     local lastNpcLine = npcLastLine(history) or ''
     local ok, knowledgeNote = pcall(knowledge.build, npc, self.object, { userText, lastNpcLine }, function(text)
         return sanitize.toDrawable(expandVanillaText(text, npc))
-    end, limits, localsByNpc[npc.id])
+    end, limits, localsByNpc[npc.id], llm.isTopicKnown)
     if ok and knowledgeNote then
         notes[#notes + 1] = knowledgeNote
     elseif not ok then
